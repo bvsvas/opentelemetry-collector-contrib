@@ -5,6 +5,7 @@ package kafkaexporter // import "github.com/open-telemetry/opentelemetry-collect
 
 import (
 	"context"
+	"fmt"
 	"iter"
 
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -115,6 +116,7 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 			return ferr
 		}
 		if e.messenger.useAsync() {
+			fmt.Println("$$$$$ TEST:FranzAsyncProducer $$$$$$")
 			e.producer = kafkaclient.NewFranzAsyncProducer(
 				kgoClient,
 				e.logger,
