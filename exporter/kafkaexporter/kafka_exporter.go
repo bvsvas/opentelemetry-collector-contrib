@@ -359,6 +359,10 @@ type kafkaProfilesMessenger struct {
 	marshaler marshaler.ProfilesMarshaler
 }
 
+func (e *kafkaProfilesMessenger) useAsync() bool {
+	return false
+}
+
 func (e *kafkaProfilesMessenger) marshalData(ld pprofile.Profiles) ([]marshaler.Message, error) {
 	return e.marshaler.MarshalProfiles(ld)
 }
