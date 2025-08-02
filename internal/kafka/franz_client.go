@@ -128,6 +128,9 @@ func NewFranzConsumerGroup(ctx context.Context, clientCfg configkafka.ClientConf
 	if consumerCfg.DefaultFetchSize > 0 {
 		opts = append(opts, kgo.FetchMaxBytes(consumerCfg.DefaultFetchSize))
 	}
+	if consumerCfg.MaxFetchSize > 0 {
+		opts = append(opts, kgo.FetchMaxPartitionBytes(consumerCfg.MaxFetchSize))
+	}
 
 	// Configure max fetch wait
 	if consumerCfg.MaxFetchWait > 0 {
