@@ -115,6 +115,7 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 		if ferr != nil {
 			return ferr
 		}
+		fmt.Println("$$$$$ TEST:FranzAsyncProducer e.messenger.useAsync()=", e.messenger.useAsync(), "e.cfg.Async.Enabled=", e.cfg.Async.Enabled)
 		if e.messenger.useAsync() {
 			fmt.Println("$$$$$ TEST:FranzAsyncProducer $$$$$$")
 			e.producer = kafkaclient.NewFranzAsyncProducer(
@@ -227,7 +228,7 @@ func (e *kafkaTracesMessenger) getTopic(ctx context.Context, td ptrace.Traces) s
 }
 
 func (e *kafkaTracesMessenger) useAsync() bool {
-	return false
+	return e.config.Async.Enabled
 }
 
 func (e *kafkaTracesMessenger) partitionData(td ptrace.Traces) iter.Seq2[[]byte, ptrace.Traces] {
@@ -276,7 +277,7 @@ func (e *kafkaLogsMessenger) getTopic(ctx context.Context, ld plog.Logs) string 
 }
 
 func (e *kafkaLogsMessenger) useAsync() bool {
-	return false
+	return e.config.Async.Enabled
 }
 
 func (e *kafkaLogsMessenger) partitionData(ld plog.Logs) iter.Seq2[[]byte, plog.Logs] {
@@ -362,7 +363,7 @@ type kafkaProfilesMessenger struct {
 }
 
 func (e *kafkaProfilesMessenger) useAsync() bool {
-	return false
+	return e.config.Async.Enabled
 }
 
 func (e *kafkaProfilesMessenger) marshalData(ld pprofile.Profiles) ([]marshaler.Message, error) {
