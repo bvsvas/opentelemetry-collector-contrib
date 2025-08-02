@@ -147,11 +147,11 @@ func (c ConsumerConfig) Validate() error {
 
 	if len(c.GroupRebalanceStrategy) != 0 {
 		switch c.GroupRebalanceStrategy {
-		case sarama.RangeBalanceStrategyName, sarama.RoundRobinBalanceStrategyName, sarama.StickyBalanceStrategyName:
+		case sarama.RangeBalanceStrategyName, sarama.RoundRobinBalanceStrategyName, sarama.StickyBalanceStrategyName, "cooperative-sticky":
 			// Valid
 		default:
 			return fmt.Errorf(
-				"rebalance_strategy should be one of 'range', 'roundrobin', or 'sticky'. configured value %v",
+				"rebalance_strategy should be one of 'range', 'roundrobin', 'sticky', or 'cooperative-sticky'. configured value %v",
 				c.GroupRebalanceStrategy,
 			)
 		}
