@@ -38,6 +38,9 @@ type Config struct {
 	// Traces holds configuration about how traces should be sent to Kafka.
 	Traces SignalConfig `mapstructure:"traces"`
 
+	// Profiles holds configuration about how profiles should be sent to Kafka.
+	Profiles SignalConfig `mapstructure:"profiles"`
+
 	// Topic holds the name of the Kafka topic to which data should be exported.
 	//
 	// Topic has no default. If explicitly specified, it will take precedence over
@@ -98,6 +101,9 @@ func (c *Config) Unmarshal(conf *confmap.Conf) error {
 		if zeroConfig.Traces.Topic == "" {
 			c.Traces.Topic = c.Topic
 		}
+		if zeroConfig.Profiles.Topic == "" {
+			c.Profiles.Topic = c.Topic
+		}
 	}
 	if c.Encoding != "" {
 		if zeroConfig.Logs.Encoding == "" {
@@ -108,6 +114,9 @@ func (c *Config) Unmarshal(conf *confmap.Conf) error {
 		}
 		if zeroConfig.Traces.Encoding == "" {
 			c.Traces.Encoding = c.Encoding
+		}
+		if zeroConfig.Profiles.Encoding == "" {
+			c.Profiles.Encoding = c.Encoding
 		}
 	}
 	return conf.Unmarshal(c)
@@ -122,6 +131,7 @@ type SignalConfig struct {
 	//  - "otlp_spans" for traces
 	//  - "otlp_metrics" for metrics
 	//  - "otlp_logs" for logs
+	//  - "otlp_profiles" for profiles
 	Topic string `mapstructure:"topic"`
 
 	// TopicFromMetadataKey holds the name of the metadata key to use as the
