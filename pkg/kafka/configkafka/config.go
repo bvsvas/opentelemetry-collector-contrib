@@ -103,6 +103,11 @@ type ConsumerConfig struct {
 	// The maximum amount of time to wait for MinFetchSize bytes to be
 	// available before the broker returns a response (default 250ms)
 	MaxFetchWait time.Duration `mapstructure:"max_fetch_wait"`
+	// MaxConcurrentFetches sets the maximum number of fetch requests to allow in
+	// flight or buffered at once, overriding the unbounded (i.e. number of
+	// brokers) default. A value of 0 implies the allowed concurrency is unbounded.
+	MaxConcurrentFetches int `mapstructure:"max_concurrent_fetches"`
+
 	// RebalanceStrategy specifies the strategy to use for partition assignment.
 	// Possible values are "range", "roundrobin", and "sticky".
 	// Defaults to "range".

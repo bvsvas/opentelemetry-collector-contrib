@@ -61,6 +61,8 @@ type messenger[T any] interface {
 
 	// getTopic returns the topic name for the given context and data.
 	getTopic(context.Context, T) string
+
+	useAsync() bool
 }
 
 type kafkaExporter[T any] struct {
@@ -98,7 +100,9 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 	}
 
 	if franzGoClientFeatureGate.IsEnabled() {
-		producer, ferr := kafka.NewFranzSyncProducer(
+		// The kgo.Client can be used for both sync and async producing.
+		// The distinction is made by which wrapper we use.
+		kgoClient, ferr := kafka.NewFranzProducer(
 			ctx,
 			e.cfg.ClientConfig,
 			e.cfg.Producer,
@@ -107,24 +111,47 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 			kgo.WithHooks(kafkaclient.NewFranzProducerMetrics(tb)),
 		)
 		if ferr != nil {
-			return err
+			return ferr
 		}
-		e.producer = kafkaclient.NewFranzSyncProducer(producer,
-			e.cfg.IncludeMetadataKeys,
-		)
+		if e.messenger.useAsync() {
+			e.producer = kafkaclient.NewFranzAsyncProducer(
+				kgoClient,
+				e.logger,
+				e.cfg.IncludeMetadataKeys,
+			)
+		} else {
+			e.producer = kafkaclient.NewFranzSyncProducer(kgoClient,
+				e.cfg.IncludeMetadataKeys,
+			)
+		}
 		return nil
 	}
-	producer, err := kafka.NewSaramaSyncProducer(ctx, e.cfg.ClientConfig,
-		e.cfg.Producer, e.cfg.TimeoutSettings.Timeout,
-	)
-	if err != nil {
-		return err
+	if e.messenger.useAsync() {
+		producer, err := kafka.NewSaramaAsyncProducer(ctx, e.cfg.ClientConfig,
+			e.cfg.Producer, e.cfg.TimeoutSettings.Timeout,
+		)
+		if err != nil {
+			return err
+		}
+		e.producer = kafkaclient.NewSaramaAsyncProducer(
+			producer,
+			e.logger,
+			e.cfg.IncludeMetadataKeys,
+			kafkaclient.NewSaramaProducerMetrics(e.tb),
+		)
+	} else {
+		producer, err := kafka.NewSaramaSyncProducer(ctx, e.cfg.ClientConfig,
+			e.cfg.Producer, e.cfg.TimeoutSettings.Timeout,
+		)
+		if err != nil {
+			return err
+		}
+		e.producer = kafkaclient.NewSaramaSyncProducer(
+			producer,
+			kafkaclient.NewSaramaProducerMetrics(tb),
+			e.cfg.IncludeMetadataKeys,
+		)
 	}
-	e.producer = kafkaclient.NewSaramaSyncProducer(
-		producer,
-		kafkaclient.NewSaramaProducerMetrics(tb),
-		e.cfg.IncludeMetadataKeys,
-	)
 	return nil
 }
 
@@ -171,7 +198,7 @@ func newTracesExporter(config Config, set exporter.Settings) *kafkaExporter[ptra
 	case "jaeger_proto", "jaeger_json":
 		config.PartitionTracesByID = false
 	}
-	return newKafkaExporter(config, set, func(host component.Host) (messenger[ptrace.Traces], error) {
+	return newKafkaExporter[ptrace.Traces](config, set, func(host component.Host) (messenger[ptrace.Traces], error) {
 		marshaler, err := getTracesMarshaler(config.Traces.Encoding, host)
 		if err != nil {
 			return nil, err
@@ -196,6 +223,10 @@ func (e *kafkaTracesMessenger) getTopic(ctx context.Context, td ptrace.Traces) s
 	return getTopic(ctx, e.config.Traces, e.config.TopicFromAttribute, td.ResourceSpans())
 }
 
+func (e *kafkaTracesMessenger) useAsync() bool {
+	return false
+}
+
 func (e *kafkaTracesMessenger) partitionData(td ptrace.Traces) iter.Seq2[[]byte, ptrace.Traces] {
 	return func(yield func([]byte, ptrace.Traces) bool) {
 		if !e.config.PartitionTracesByID {
@@ -216,7 +247,7 @@ func (e *kafkaTracesMessenger) partitionData(td ptrace.Traces) iter.Seq2[[]byte,
 }
 
 func newLogsExporter(config Config, set exporter.Settings) *kafkaExporter[plog.Logs] {
-	return newKafkaExporter(config, set, func(host component.Host) (messenger[plog.Logs], error) {
+	return newKafkaExporter[plog.Logs](config, set, func(host component.Host) (messenger[plog.Logs], error) {
 		marshaler, err := getLogsMarshaler(config.Logs.Encoding, host)
 		if err != nil {
 			return nil, err
@@ -241,6 +272,10 @@ func (e *kafkaLogsMessenger) getTopic(ctx context.Context, ld plog.Logs) string 
 	return getTopic(ctx, e.config.Logs, e.config.TopicFromAttribute, ld.ResourceLogs())
 }
 
+func (e *kafkaLogsMessenger) useAsync() bool {
+	return false
+}
+
 func (e *kafkaLogsMessenger) partitionData(ld plog.Logs) iter.Seq2[[]byte, plog.Logs] {
 	return func(yield func([]byte, plog.Logs) bool) {
 		if !e.config.PartitionLogsByResourceAttributes {
@@ -259,7 +294,7 @@ func (e *kafkaLogsMessenger) partitionData(ld plog.Logs) iter.Seq2[[]byte, plog.
 }
 
 func newMetricsExporter(config Config, set exporter.Settings) *kafkaExporter[pmetric.Metrics] {
-	return newKafkaExporter(config, set, func(host component.Host) (messenger[pmetric.Metrics], error) {
+	return newKafkaExporter[pmetric.Metrics](config, set, func(host component.Host) (messenger[pmetric.Metrics], error) {
 		marshaler, err := getMetricsMarshaler(config.Metrics.Encoding, host)
 		if err != nil {
 			return nil, err
@@ -282,6 +317,10 @@ func (e *kafkaMetricsMessenger) marshalData(md pmetric.Metrics) ([]marshaler.Mes
 
 func (e *kafkaMetricsMessenger) getTopic(ctx context.Context, md pmetric.Metrics) string {
 	return getTopic(ctx, e.config.Metrics, e.config.TopicFromAttribute, md.ResourceMetrics())
+}
+
+func (e *kafkaMetricsMessenger) useAsync() bool {
+	return e.config.Async.Enabled
 }
 
 func (e *kafkaMetricsMessenger) partitionData(md pmetric.Metrics) iter.Seq2[[]byte, pmetric.Metrics] {

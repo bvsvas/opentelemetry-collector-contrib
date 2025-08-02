@@ -28,6 +28,13 @@ type Config struct {
 	// Metrics holds configuration about how metrics should be sent to Kafka.
 	Metrics SignalConfig `mapstructure:"metrics"`
 
+	// Async holds configuration for asynchronous producing.
+	Async struct {
+		// If true, the exporter will produce messages asynchronously.
+		// This is supported for all signals.
+		Enabled bool `mapstructure:"enabled"`
+	} `mapstructure:"async"`
+
 	// Traces holds configuration about how traces should be sent to Kafka.
 	Traces SignalConfig `mapstructure:"traces"`
 

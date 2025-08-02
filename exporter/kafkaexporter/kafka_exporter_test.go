@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -27,6 +28,9 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/testdata"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/kafkaclient"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter/internal/metadata"
@@ -39,7 +43,7 @@ import (
 
 func TestTracesPusher(t *testing.T) {
 	config := createDefaultConfig().(*Config)
-	exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 	producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(
 		func(msg *sarama.ProducerMessage) error {
 			if msg.Topic != "otlp_spans" {
@@ -56,7 +60,7 @@ func TestTracesPusher(t *testing.T) {
 func TestTracesPusher_attr(t *testing.T) {
 	config := createDefaultConfig().(*Config)
 	config.TopicFromAttribute = "kafka_topic"
-	exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 	producer.ExpectSendMessageAndSucceed()
 
 	err := exp.exportData(context.Background(), testdata.GenerateTraces(2))
@@ -66,7 +70,7 @@ func TestTracesPusher_attr(t *testing.T) {
 func TestTracesPusher_ctx(t *testing.T) {
 	t.Run("WithTopic", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageAndSucceed()
 
 		err := exp.exportData(topic.WithTopic(context.Background(), "my_topic"), testdata.GenerateTraces(2))
@@ -75,7 +79,7 @@ func TestTracesPusher_ctx(t *testing.T) {
 	t.Run("WithMetadata", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.IncludeMetadataKeys = []string{"x-tenant-id", "x-request-ids"}
-		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(func(pm *sarama.ProducerMessage) error {
 			assert.Equal(t, []sarama.RecordHeader{
 				{Key: []byte("x-tenant-id"), Value: []byte("my_tenant_id")},
@@ -99,7 +103,7 @@ func TestTracesPusher_ctx(t *testing.T) {
 	})
 	t.Run("WithMetadataDisabled", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(func(pm *sarama.ProducerMessage) error {
 			assert.Nil(t, pm.Headers)
 			return nil
@@ -215,7 +219,7 @@ func TestTracesPusher_ctx_Kgo(t *testing.T) {
 
 func TestTracesPusher_err(t *testing.T) {
 	config := createDefaultConfig().(*Config)
-	exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 	expErr := errors.New("failed to send")
 	producer.ExpectSendMessageAndFail(expErr)
@@ -237,7 +241,7 @@ func TestTracesPusher_conf_err(t *testing.T) {
 		}
 		config := createDefaultConfig().(*Config)
 		config.Traces.Encoding = "trace_encoding"
-		exp, _ := newMockTracesExporter(t, *config, host)
+		exp, _ := newMockTracesExporter(t, *config, host, exportertest.NewNopSettings(metadata.Type))
 
 		err := exp.exportData(context.Background(), testdata.GenerateTraces(2))
 
@@ -254,7 +258,7 @@ func TestTracesPusher_marshal_error(t *testing.T) {
 	}
 	config := createDefaultConfig().(*Config)
 	config.Traces.Encoding = "trace_encoding"
-	exp, _ := newMockTracesExporter(t, *config, host)
+	exp, _ := newMockTracesExporter(t, *config, host, exportertest.NewNopSettings(metadata.Type))
 
 	err := exp.exportData(context.Background(), testdata.GenerateTraces(2))
 	assert.ErrorContains(t, err, marshalErr.Error())
@@ -277,7 +281,7 @@ func TestTracesPusher_partitioning(t *testing.T) {
 
 	t.Run("default_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(
 			func(msg *sarama.ProducerMessage) error {
 				if msg.Key != nil {
@@ -293,7 +297,7 @@ func TestTracesPusher_partitioning(t *testing.T) {
 	t.Run("jaeger_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.Traces.Encoding = "jaeger_json"
-		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 		// Jaeger encodings produce one message per span,
 		// and each one will have the trace ID as the key.
@@ -322,7 +326,7 @@ func TestTracesPusher_partitioning(t *testing.T) {
 	t.Run("trace_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.PartitionTracesByID = true
-		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockTracesExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 		// We should get one message per ResourceSpans,
 		// even if they have the same service name.
@@ -380,7 +384,7 @@ func TestTracesPusher_partitioning(t *testing.T) {
 
 func TestMetricsDataPusher(t *testing.T) {
 	config := createDefaultConfig().(*Config)
-	exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 	producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(
 		func(msg *sarama.ProducerMessage) error {
 			if msg.Topic != "otlp_metrics" {
@@ -397,7 +401,7 @@ func TestMetricsDataPusher(t *testing.T) {
 func TestMetricsDataPusher_attr(t *testing.T) {
 	config := createDefaultConfig().(*Config)
 	config.TopicFromAttribute = "kafka_topic"
-	exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 	producer.ExpectSendMessageAndSucceed()
 
 	err := exp.exportData(context.Background(), testdata.GenerateMetrics(2))
@@ -407,7 +411,7 @@ func TestMetricsDataPusher_attr(t *testing.T) {
 func TestMetricsDataPusher_ctx(t *testing.T) {
 	t.Run("WithTopic", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageAndSucceed()
 
 		err := exp.exportData(topic.WithTopic(context.Background(), "my_topic"), testdata.GenerateMetrics(2))
@@ -416,7 +420,7 @@ func TestMetricsDataPusher_ctx(t *testing.T) {
 	t.Run("WithMetadata", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.IncludeMetadataKeys = []string{"x-tenant-id", "x-request-ids"}
-		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(func(pm *sarama.ProducerMessage) error {
 			assert.Equal(t, []sarama.RecordHeader{
 				{Key: []byte("x-tenant-id"), Value: []byte("my_tenant_id")},
@@ -440,7 +444,7 @@ func TestMetricsDataPusher_ctx(t *testing.T) {
 	})
 	t.Run("WithMetadataDisabled", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(func(pm *sarama.ProducerMessage) error {
 			assert.Nil(t, pm.Headers)
 			return nil
@@ -462,13 +466,121 @@ func TestMetricsDataPusher_ctx(t *testing.T) {
 
 func TestMetricsPusher_err(t *testing.T) {
 	config := createDefaultConfig().(*Config)
-	exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 	expErr := errors.New("failed to send")
 	producer.ExpectSendMessageAndFail(expErr)
 
 	err := exp.exportData(context.Background(), testdata.GenerateMetrics(2))
 	assert.EqualError(t, err, expErr.Error())
+}
+
+func TestMetricsPusher_success_async(t *testing.T) {
+	config := createDefaultConfig().(*Config)
+	config.Async.Enabled = true
+
+	set := exportertest.NewNopSettings(metadata.Type)
+	tel := componenttest.NewTelemetry()
+	set.TelemetrySettings = tel.NewTelemetrySettings()
+	core, observed := observer.New(zap.ErrorLevel)
+	set.Logger = zap.New(core)
+
+	exp, producer := newMockAsyncMetricsExporter(t, *config, componenttest.NewNopHost(), set)
+
+	producer.ExpectInputAndSucceed()
+
+	// The export should return no error.
+	err := exp.exportData(context.Background(), testdata.GenerateMetrics(1))
+	require.NoError(t, err)
+
+	// No errors should have been logged.
+	assert.Equal(t, 0, observed.Len())
+
+	// Wait for the success to be processed and metrics to be recorded.
+	assert.Eventually(t, func() bool {
+		m, err := tel.GetMetric("otelcol_kafka_exporter_messages")
+		if err != nil {
+			return false
+		}
+		return len(m.Data.(metricdata.Sum[int64]).DataPoints) > 0
+	}, time.Second, 10*time.Millisecond)
+
+	// Check for metrics
+	m, err := tel.GetMetric("otelcol_kafka_exporter_messages")
+	require.NoError(t, err)
+	points := m.Data.(metricdata.Sum[int64]).DataPoints
+	require.Len(t, points, 1)
+	assert.Equal(t, int64(1), points[0].Value)
+	topicVal, ok := points[0].Attributes.Value("topic")
+	require.True(t, ok)
+	assert.Equal(t, "otlp_metrics", topicVal.AsString())
+	outcomeVal, ok := points[0].Attributes.Value("outcome")
+	require.True(t, ok)
+	assert.Equal(t, "success", outcomeVal.AsString())
+
+	latency, err := tel.GetMetric("otelcol_kafka_exporter_latency")
+	require.NoError(t, err)
+	latencyPoints := latency.Data.(metricdata.Histogram[int64]).DataPoints
+	require.Len(t, latencyPoints, 1)
+	assert.Equal(t, uint64(1), latencyPoints[0].Count)
+}
+
+func TestMetricsPusher_err_async(t *testing.T) {
+	config := createDefaultConfig().(*Config)
+	config.Async.Enabled = true
+
+	set := exportertest.NewNopSettings(metadata.Type)
+	tel := componenttest.NewTelemetry()
+	set.TelemetrySettings = tel.NewTelemetrySettings()
+	core, observed := observer.New(zap.ErrorLevel)
+	set.Logger = zap.New(core)
+
+	exp, producer := newMockAsyncMetricsExporter(t, *config, componenttest.NewNopHost(), set)
+
+	expErr := errors.New("failed to send")
+	producer.ExpectInputAndFail(expErr)
+
+	err := exp.exportData(context.Background(), testdata.GenerateMetrics(2))
+	assert.NoError(t, err)
+
+	// Wait for the error to be logged.
+	require.Eventually(t, func() bool {
+		return observed.Len() > 0
+	}, time.Second, 10*time.Millisecond)
+
+	log := observed.All()[0]
+	assert.Equal(t, "Failed to produce message to Kafka", log.Message)
+
+	errVal, ok := log.ContextMap()["error"]
+	require.True(t, ok, "error field not found in log context")
+
+	expectedErrStr := "kafka: Failed to produce message to topic otlp_metrics: failed to send"
+
+	// The type of errVal can be either error or string depending on the zap
+	// version and configuration. This handles both to make the test robust.
+	var actualErrStr string
+	switch e := errVal.(type) {
+	case error:
+		actualErrStr = e.Error()
+	case string:
+		actualErrStr = e
+	default:
+		t.Fatalf("unexpected type for error field: %T", errVal)
+	}
+	assert.Contains(t, actualErrStr, expectedErrStr)
+
+	// Check for metrics
+	m, err := tel.GetMetric("otelcol_kafka_exporter_messages")
+	require.NoError(t, err)
+	points := m.Data.(metricdata.Sum[int64]).DataPoints
+	require.Len(t, points, 1)
+	assert.Equal(t, int64(1), points[0].Value)
+	topicVal, ok := points[0].Attributes.Value("topic")
+	require.True(t, ok)
+	assert.Equal(t, "otlp_metrics", topicVal.AsString())
+	outcomeVal, ok := points[0].Attributes.Value("outcome")
+	require.True(t, ok)
+	assert.Equal(t, "failure", outcomeVal.AsString())
 }
 
 func TestMetricsPusher_conf_err(t *testing.T) {
@@ -484,7 +596,7 @@ func TestMetricsPusher_conf_err(t *testing.T) {
 		}
 		config := createDefaultConfig().(*Config)
 		config.Traces.Encoding = "metric_encoding"
-		exp, _ := newMockTracesExporter(t, *config, host)
+		exp, _ := newMockTracesExporter(t, *config, host, exportertest.NewNopSettings(metadata.Type))
 
 		err := exp.exportData(context.Background(), testdata.GenerateTraces(2))
 
@@ -501,7 +613,7 @@ func TestMetricsPusher_marshal_error(t *testing.T) {
 	}
 	config := createDefaultConfig().(*Config)
 	config.Metrics.Encoding = "metric_encoding"
-	exp, _ := newMockMetricsExporter(t, *config, host)
+	exp, _ := newMockMetricsExporter(t, *config, host, exportertest.NewNopSettings(metadata.Type))
 
 	err := exp.exportData(context.Background(), testdata.GenerateMetrics(2))
 	assert.ErrorContains(t, err, marshalErr.Error())
@@ -517,7 +629,7 @@ func TestMetricsPusher_partitioning(t *testing.T) {
 
 	t.Run("default_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(
 			func(msg *sarama.ProducerMessage) error {
 				if msg.Key != nil {
@@ -533,7 +645,7 @@ func TestMetricsPusher_partitioning(t *testing.T) {
 	t.Run("resource_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.PartitionMetricsByResourceAttributes = true
-		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockMetricsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 		// We should get one message per ResourceMetrics,
 		// even if they have the same service name.
@@ -700,7 +812,7 @@ func TestMetricsDataPusher_ctx_Kgo(t *testing.T) {
 
 func TestLogsDataPusher(t *testing.T) {
 	config := createDefaultConfig().(*Config)
-	exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 	producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(
 		func(msg *sarama.ProducerMessage) error {
 			if msg.Topic != "otlp_logs" {
@@ -717,7 +829,7 @@ func TestLogsDataPusher(t *testing.T) {
 func TestLogsDataPusher_attr(t *testing.T) {
 	config := createDefaultConfig().(*Config)
 	config.TopicFromAttribute = "kafka_topic"
-	exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 	producer.ExpectSendMessageAndSucceed()
 
 	err := exp.exportData(context.Background(), testdata.GenerateLogs(2))
@@ -727,7 +839,7 @@ func TestLogsDataPusher_attr(t *testing.T) {
 func TestLogsDataPusher_ctx(t *testing.T) {
 	t.Run("WithTopic", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageAndSucceed()
 
 		err := exp.exportData(topic.WithTopic(context.Background(), "my_topic"), testdata.GenerateLogs(2))
@@ -736,7 +848,7 @@ func TestLogsDataPusher_ctx(t *testing.T) {
 	t.Run("WithMetadata", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.IncludeMetadataKeys = []string{"x-tenant-id", "x-request-ids"}
-		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(func(pm *sarama.ProducerMessage) error {
 			assert.Equal(t, []sarama.RecordHeader{
 				{Key: []byte("x-tenant-id"), Value: []byte("my_tenant_id")},
@@ -760,7 +872,7 @@ func TestLogsDataPusher_ctx(t *testing.T) {
 	})
 	t.Run("WithMetadataDisabled", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(func(pm *sarama.ProducerMessage) error {
 			assert.Nil(t, pm.Headers)
 			return nil
@@ -875,7 +987,7 @@ func TestLogsDataPusher_ctx_Kgo(t *testing.T) {
 
 func TestLogsPusher_err(t *testing.T) {
 	config := createDefaultConfig().(*Config)
-	exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+	exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 	expErr := errors.New("failed to send")
 	producer.ExpectSendMessageAndFail(expErr)
@@ -897,7 +1009,7 @@ func TestLogsPusher_conf_err(t *testing.T) {
 		}
 		config := createDefaultConfig().(*Config)
 		config.Traces.Encoding = "log_encoding"
-		exp, _ := newMockTracesExporter(t, *config, host)
+		exp, _ := newMockTracesExporter(t, *config, host, exportertest.NewNopSettings(metadata.Type))
 
 		err := exp.exportData(context.Background(), testdata.GenerateTraces(2))
 
@@ -914,7 +1026,7 @@ func TestLogsPusher_marshal_error(t *testing.T) {
 	}
 	config := createDefaultConfig().(*Config)
 	config.Logs.Encoding = "log_encoding"
-	exp, _ := newMockLogsExporter(t, *config, host)
+	exp, _ := newMockLogsExporter(t, *config, host, exportertest.NewNopSettings(metadata.Type))
 
 	err := exp.exportData(context.Background(), testdata.GenerateLogs(2))
 	assert.ErrorContains(t, err, marshalErr.Error())
@@ -930,7 +1042,7 @@ func TestLogsPusher_partitioning(t *testing.T) {
 
 	t.Run("default_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
-		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 		producer.ExpectSendMessageWithMessageCheckerFunctionAndSucceed(
 			func(msg *sarama.ProducerMessage) error {
 				if msg.Key != nil {
@@ -946,7 +1058,7 @@ func TestLogsPusher_partitioning(t *testing.T) {
 	t.Run("resource_partitioning", func(t *testing.T) {
 		config := createDefaultConfig().(*Config)
 		config.PartitionLogsByResourceAttributes = true
-		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost())
+		exp, producer := newMockLogsExporter(t, *config, componenttest.NewNopHost(), exportertest.NewNopSettings(metadata.Type))
 
 		// We should get one message per ResourceLogs,
 		// even if they have the same service name.
@@ -1190,8 +1302,7 @@ func (f plogMarshalerFuncExtension) Shutdown(context.Context) error {
 	return nil
 }
 
-func newMockTracesExporter(t *testing.T, cfg Config, host component.Host) (*kafkaExporter[ptrace.Traces], *mocks.SyncProducer) {
-	set := exportertest.NewNopSettings(metadata.Type)
+func newMockTracesExporter(t *testing.T, cfg Config, host component.Host, set exporter.Settings) (*kafkaExporter[ptrace.Traces], *mocks.SyncProducer) {
 	exp := newTracesExporter(cfg, set)
 
 	// Fake starting the exporter.
@@ -1215,8 +1326,7 @@ func newMockTracesExporter(t *testing.T, cfg Config, host component.Host) (*kafk
 	return exp, producer
 }
 
-func newMockMetricsExporter(t *testing.T, cfg Config, host component.Host) (*kafkaExporter[pmetric.Metrics], *mocks.SyncProducer) {
-	set := exportertest.NewNopSettings(metadata.Type)
+func newMockMetricsExporter(t *testing.T, cfg Config, host component.Host, set exporter.Settings) (*kafkaExporter[pmetric.Metrics], *mocks.SyncProducer) {
 	exp := newMetricsExporter(cfg, set)
 
 	// Fake starting the exporter.
@@ -1240,8 +1350,32 @@ func newMockMetricsExporter(t *testing.T, cfg Config, host component.Host) (*kaf
 	return exp, producer
 }
 
-func newMockLogsExporter(t *testing.T, cfg Config, host component.Host) (*kafkaExporter[plog.Logs], *mocks.SyncProducer) {
-	set := exportertest.NewNopSettings(metadata.Type)
+func newMockAsyncMetricsExporter(t *testing.T, cfg Config, host component.Host, set exporter.Settings) (*kafkaExporter[pmetric.Metrics], *mocks.AsyncProducer) {
+	exp := newMetricsExporter(cfg, set)
+
+	// Fake starting the exporter.
+	messenger, err := exp.newMessenger(host)
+	require.NoError(t, err)
+	exp.messenger = messenger
+	exp.logger = set.Logger
+	tb, err := metadata.NewTelemetryBuilder(set.TelemetrySettings)
+	require.NoError(t, err)
+	exp.tb = tb
+
+	// Create a mock producer.
+	producer := mocks.NewAsyncProducer(t, sarama.NewConfig())
+	exp.producer = kafkaclient.NewSaramaAsyncProducer(
+		producer,
+		set.Logger,
+		cfg.IncludeMetadataKeys,
+		kafkaclient.NewSaramaProducerMetrics(tb),
+	)
+
+	t.Cleanup(func() { _ = exp.Close(context.Background()) })
+	return exp, producer
+}
+
+func newMockLogsExporter(t *testing.T, cfg Config, host component.Host, set exporter.Settings) (*kafkaExporter[plog.Logs], *mocks.SyncProducer) {
 	exp := newLogsExporter(cfg, set)
 
 	// Fake starting the exporter.

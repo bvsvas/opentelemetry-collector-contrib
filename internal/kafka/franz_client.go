@@ -34,8 +34,8 @@ const (
 	AWSMSKIAMOAUTHBEARER = "AWS_MSK_IAM_OAUTHBEARER" //nolint:gosec // These aren't credentials.
 )
 
-// NewFranzSyncProducer creates a new Kafka client using the franz-go library.
-func NewFranzSyncProducer(ctx context.Context, clientCfg configkafka.ClientConfig,
+// NewFranzProducer creates a new Kafka client using the franz-go library.
+func NewFranzProducer(ctx context.Context, clientCfg configkafka.ClientConfig,
 	cfg configkafka.ProducerConfig,
 	timeout time.Duration,
 	logger *zap.Logger,
@@ -132,6 +132,12 @@ func NewFranzConsumerGroup(ctx context.Context, clientCfg configkafka.ClientConf
 	// Configure max fetch wait
 	if consumerCfg.MaxFetchWait > 0 {
 		opts = append(opts, kgo.FetchMaxWait(consumerCfg.MaxFetchWait))
+	}
+
+	// Configure max concurrent fetches
+	if consumerCfg.MaxConcurrentFetches > 0 {
+		fmt.Println("TEST: MaxConcurrentFetches = ", consumerCfg.MaxConcurrentFetches)
+		opts = append(opts, kgo.MaxConcurrentFetches(consumerCfg.MaxConcurrentFetches))
 	}
 
 	interval := consumerCfg.AutoCommit.Interval

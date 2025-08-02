@@ -30,7 +30,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/configkafka"
 )
 
-func TestNewFranzSyncProducer_SASL(t *testing.T) {
+func TestNewFranzProducer_SASL(t *testing.T) {
 	_, clientConfig := kafkatest.NewCluster(t, kfake.EnableSASL(),
 		kfake.Superuser(PLAIN, "plain_user", "plain_password"),
 		kfake.Superuser(SCRAMSHA256, "scramsha256_user", "scramsha256_password"),
@@ -45,7 +45,7 @@ func TestNewFranzSyncProducer_SASL(t *testing.T) {
 			Version:   1, // kfake only supports version 1
 		}
 		tl := zaptest.NewLogger(t, zaptest.Level(zap.WarnLevel))
-		client, err := NewFranzSyncProducer(context.Background(), clientConfig,
+		client, err := NewFranzProducer(context.Background(), clientConfig,
 			configkafka.NewDefaultProducerConfig(), time.Second, tl,
 		)
 		if err != nil {
@@ -109,7 +109,7 @@ func TestNewFranzSyncProducer_SASL(t *testing.T) {
 	}
 }
 
-func TestNewFranzSyncProducer_TLS(t *testing.T) {
+func TestNewFranzProducer_TLS(t *testing.T) {
 	// We create an httptest.Server just so we can get its TLS configuration.
 	httpServer := httptest.NewTLSServer(http.NewServeMux())
 	defer httpServer.Close()
@@ -121,7 +121,7 @@ func TestNewFranzSyncProducer_TLS(t *testing.T) {
 		clientConfig := clientConfig // copy
 		clientConfig.TLS = &cfg
 		tl := zaptest.NewLogger(t, zaptest.Level(zap.WarnLevel))
-		client, err := NewFranzSyncProducer(context.Background(), clientConfig,
+		client, err := NewFranzProducer(context.Background(), clientConfig,
 			configkafka.NewDefaultProducerConfig(), time.Second, tl,
 		)
 		if err != nil {
@@ -162,7 +162,7 @@ func TestNewFranzSyncProducer_TLS(t *testing.T) {
 	})
 }
 
-func TestNewFranzSyncProducerCompression(t *testing.T) {
+func TestNewFranzProducer_Compression(t *testing.T) {
 	compressionAlgos := []string{"none", "gzip", "snappy", "lz4", "zstd"}
 	for i, compressionAlgo := range compressionAlgos {
 		t.Run(compressionAlgo, func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestNewFranzSyncProducerCompression(t *testing.T) {
 			prodCfg.Compression = compressionAlgo
 
 			tl := zaptest.NewLogger(t, zaptest.Level(zap.InfoLevel))
-			client, err := NewFranzSyncProducer(context.Background(), clientConfig, prodCfg, time.Second, tl)
+			client, err := NewFranzProducer(context.Background(), clientConfig, prodCfg, time.Second, tl)
 			require.NoError(t, err)
 			defer client.Close()
 
@@ -227,7 +227,7 @@ func TestNewFranzSyncProducerCompression(t *testing.T) {
 	}
 }
 
-func TestNewFranzSyncProducerRequiredAcks(t *testing.T) {
+func TestNewFranzProducer_RequiredAcks(t *testing.T) {
 	topic := "topic"
 	_, clientConfig := kafkatest.NewCluster(t, kfake.SeedTopics(1, topic))
 	acks := []configkafka.RequiredAcks{
@@ -242,7 +242,7 @@ func TestNewFranzSyncProducerRequiredAcks(t *testing.T) {
 			prodCfg.RequiredAcks = ack
 
 			tl := zaptest.NewLogger(t, zaptest.Level(zap.WarnLevel))
-			client, err := NewFranzSyncProducer(context.Background(), clientConfig, prodCfg, time.Second, tl)
+			client, err := NewFranzProducer(context.Background(), clientConfig, prodCfg, time.Second, tl)
 			require.NoError(t, err)
 			defer client.Close()
 

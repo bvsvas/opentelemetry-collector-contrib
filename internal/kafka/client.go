@@ -102,6 +102,21 @@ func NewSaramaSyncProducer(
 	return sarama.NewSyncProducer(clientConfig.Brokers, saramaConfig)
 }
 
+// NewSaramaAsyncProducer returns a new asynchronous Kafka producer with the given configuration.
+func NewSaramaAsyncProducer(
+	ctx context.Context,
+	clientConfig configkafka.ClientConfig,
+	producerConfig configkafka.ProducerConfig,
+	producerTimeout time.Duration,
+) (sarama.AsyncProducer, error) {
+	saramaConfig, err := newSaramaClientConfig(ctx, clientConfig)
+	if err != nil {
+		return nil, err
+	}
+	setSaramaProducerConfig(saramaConfig, producerConfig, producerTimeout)
+	return sarama.NewAsyncProducer(clientConfig.Brokers, saramaConfig)
+}
+
 func setSaramaProducerConfig(
 	out *sarama.Config,
 	producerConfig configkafka.ProducerConfig,
