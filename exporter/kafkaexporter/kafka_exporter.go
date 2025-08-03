@@ -63,8 +63,6 @@ type messenger[T any] interface {
 
 	// getTopic returns the topic name for the given context and data.
 	getTopic(context.Context, T) string
-
-	useAsync() bool
 }
 
 type kafkaExporter[T any] struct {
@@ -101,6 +99,7 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 		return err
 	}
 
+	fmt.Println("$$$$$ TEST:AsyncProducer e.cfg.Async.Enabled=", e.cfg.Async.Enabled)
 	if franzGoClientFeatureGate.IsEnabled() {
 		// The kgo.Client can be used for both sync and async producing.
 		// The distinction is made by which wrapper we use.
@@ -115,8 +114,7 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 		if ferr != nil {
 			return ferr
 		}
-		fmt.Println("$$$$$ TEST:FranzAsyncProducer e.messenger.useAsync()=", e.messenger.useAsync(), "e.cfg.Async.Enabled=", e.cfg.Async.Enabled)
-		if e.messenger.useAsync() {
+		if e.cfg.Async.Enabled {
 			fmt.Println("$$$$$ TEST:FranzAsyncProducer $$$$$$")
 			e.producer = kafkaclient.NewFranzAsyncProducer(
 				kgoClient,
@@ -130,7 +128,7 @@ func (e *kafkaExporter[T]) Start(ctx context.Context, host component.Host) (err 
 		}
 		return nil
 	}
-	if e.messenger.useAsync() {
+	if e.cfg.Async.Enabled {
 		producer, err := kafka.NewSaramaAsyncProducer(ctx, e.cfg.ClientConfig,
 			e.cfg.Producer, e.cfg.TimeoutSettings.Timeout,
 		)
@@ -227,10 +225,6 @@ func (e *kafkaTracesMessenger) getTopic(ctx context.Context, td ptrace.Traces) s
 	return getTopic(ctx, e.config.Traces, e.config.TopicFromAttribute, td.ResourceSpans())
 }
 
-func (e *kafkaTracesMessenger) useAsync() bool {
-	return e.config.Async.Enabled
-}
-
 func (e *kafkaTracesMessenger) partitionData(td ptrace.Traces) iter.Seq2[[]byte, ptrace.Traces] {
 	return func(yield func([]byte, ptrace.Traces) bool) {
 		if !e.config.PartitionTracesByID {
@@ -276,10 +270,6 @@ func (e *kafkaLogsMessenger) getTopic(ctx context.Context, ld plog.Logs) string 
 	return getTopic(ctx, e.config.Logs, e.config.TopicFromAttribute, ld.ResourceLogs())
 }
 
-func (e *kafkaLogsMessenger) useAsync() bool {
-	return e.config.Async.Enabled
-}
-
 func (e *kafkaLogsMessenger) partitionData(ld plog.Logs) iter.Seq2[[]byte, plog.Logs] {
 	return func(yield func([]byte, plog.Logs) bool) {
 		if !e.config.PartitionLogsByResourceAttributes {
@@ -323,10 +313,6 @@ func (e *kafkaMetricsMessenger) getTopic(ctx context.Context, md pmetric.Metrics
 	return getTopic(ctx, e.config.Metrics, e.config.TopicFromAttribute, md.ResourceMetrics())
 }
 
-func (e *kafkaMetricsMessenger) useAsync() bool {
-	return e.config.Async.Enabled
-}
-
 func (e *kafkaMetricsMessenger) partitionData(md pmetric.Metrics) iter.Seq2[[]byte, pmetric.Metrics] {
 	return func(yield func([]byte, pmetric.Metrics) bool) {
 		if !e.config.PartitionMetricsByResourceAttributes {
@@ -360,10 +346,6 @@ func newProfilesExporter(config Config, set exporter.Settings) *kafkaExporter[pp
 type kafkaProfilesMessenger struct {
 	config    Config
 	marshaler marshaler.ProfilesMarshaler
-}
-
-func (e *kafkaProfilesMessenger) useAsync() bool {
-	return e.config.Async.Enabled
 }
 
 func (e *kafkaProfilesMessenger) marshalData(ld pprofile.Profiles) ([]marshaler.Message, error) {
