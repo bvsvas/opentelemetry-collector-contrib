@@ -79,6 +79,7 @@ func TestLoadConfig(t *testing.T) {
 				Topic:                                "spans",
 				PartitionTracesByID:                  true,
 				PartitionMetricsByResourceAttributes: true,
+				PartitionMetricsRoutingKey:           "resource",
 				PartitionLogsByResourceAttributes:    true,
 			},
 		},
@@ -107,7 +108,8 @@ func TestLoadConfig(t *testing.T) {
 					Topic:    "legacy_topic",
 					Encoding: "otlp_proto",
 				},
-				Topic: "legacy_topic",
+				Topic:                       "legacy_topic",
+				PartitionMetricsRoutingKey: "resource",
 			},
 		},
 		{
@@ -134,7 +136,8 @@ func TestLoadConfig(t *testing.T) {
 					Topic:    "otlp_profiles",
 					Encoding: "legacy_encoding",
 				},
-				Encoding: "legacy_encoding",
+				Encoding:                    "legacy_encoding",
+				PartitionMetricsRoutingKey: "resource",
 			},
 		},
 	}
@@ -149,6 +152,71 @@ func TestLoadConfig(t *testing.T) {
 
 			assert.NoError(t, xconfmap.Validate(cfg))
 			assert.Equal(t, tt.expected, cfg)
+		})
+	}
+}
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid_resource_routing",
+			config: Config{
+				PartitionMetricsByResourceAttributes: true,
+				PartitionMetricsRoutingKey:           "resource",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid_resource_and_metric_routing",
+			config: Config{
+				PartitionMetricsByResourceAttributes: true,
+				PartitionMetricsRoutingKey:           "resource_and_metric",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid_empty_routing_key",
+			config: Config{
+				PartitionMetricsByResourceAttributes: true,
+				PartitionMetricsRoutingKey:           "",
+			},
+			wantErr: false, // defaults to "resource"
+		},
+		{
+			name: "invalid_routing_key",
+			config: Config{
+				PartitionMetricsByResourceAttributes: true,
+				PartitionMetricsRoutingKey:           "invalid",
+			},
+			wantErr: true,
+			errMsg:  "invalid partition_metrics_routing_key",
+		},
+		{
+			name: "routing_key_ignored_when_partitioning_disabled",
+			config: Config{
+				PartitionMetricsByResourceAttributes: false,
+				PartitionMetricsRoutingKey:           "invalid",
+			},
+			wantErr: false, // ignored when partitioning is disabled
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errMsg != "" {
+					require.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }

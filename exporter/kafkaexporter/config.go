@@ -4,6 +4,8 @@
 package kafkaexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter"
 
 import (
+	"fmt"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configretry"
 	"go.opentelemetry.io/collector/confmap"
@@ -74,10 +76,39 @@ type Config struct {
 	// identifying attributes.
 	PartitionMetricsByResourceAttributes bool `mapstructure:"partition_metrics_by_resource_attributes"`
 
+	// PartitionMetricsRoutingKey controls HOW metrics are partitioned when
+	// PartitionMetricsByResourceAttributes is true.
+	//
+	// Supported values:
+	//   - "resource" (default): Partition by resource attributes only
+	//   - "resource_and_metric": Partition by resource attributes + metric name
+	//
+	// The "resource_and_metric" strategy distributes hot sources across multiple partitions,
+	// one per unique metric name, which helps eliminate hot partition issues.
+	//
+	// This field is ignored if PartitionMetricsByResourceAttributes is false.
+	PartitionMetricsRoutingKey string `mapstructure:"partition_metrics_routing_key"`
+
 	// PartitionLogsByResourceAttributes controls the partitioning of logs messages by resource.
 	// If this is true, then the message key will be set to a hash of the resource's identifying
 	// attributes.
 	PartitionLogsByResourceAttributes bool `mapstructure:"partition_logs_by_resource_attributes"`
+}
+
+// Validate checks if the exporter configuration is valid
+func (c *Config) Validate() error {
+	// Validate PartitionMetricsRoutingKey
+	if c.PartitionMetricsByResourceAttributes {
+		switch c.PartitionMetricsRoutingKey {
+		case "", "resource", "resource_and_metric":
+			// Valid values
+		default:
+			return fmt.Errorf("invalid partition_metrics_routing_key: %q, "+
+				"must be one of: 'resource', 'resource_and_metric'",
+				c.PartitionMetricsRoutingKey)
+		}
+	}
+	return nil
 }
 
 func (c *Config) Unmarshal(conf *confmap.Conf) error {

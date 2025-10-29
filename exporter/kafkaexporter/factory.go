@@ -32,6 +32,8 @@ const (
 	defaultPartitionMetricsByResourceAttributesEnabled = false
 	// partitioning logs by resource attributes is disabled by default
 	defaultPartitionLogsByResourceAttributesEnabled = false
+	// default routing key for metrics partitioning
+	defaultPartitionMetricsRoutingKey = "resource"
 )
 
 // NewFactory creates Kafka exporter factory.
@@ -70,6 +72,7 @@ func createDefaultConfig() component.Config {
 			Encoding: defaultProfilesEncoding,
 		},
 		PartitionMetricsByResourceAttributes: defaultPartitionMetricsByResourceAttributesEnabled,
+		PartitionMetricsRoutingKey:           defaultPartitionMetricsRoutingKey,
 		PartitionLogsByResourceAttributes:    defaultPartitionLogsByResourceAttributesEnabled,
 	}
 }
