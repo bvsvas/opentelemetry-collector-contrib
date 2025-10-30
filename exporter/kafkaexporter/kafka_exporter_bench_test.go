@@ -614,3 +614,485 @@ func BenchmarkHashComputation_Realistic(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkMemoryComparison_SameInput compares memory usage between strategies with identical input
+func BenchmarkMemoryComparison_SameInput(b *testing.B) {
+	scenarios := []struct {
+		name             string
+		numSources       int
+		metricsPerSource int
+	}{
+		{"10sources_10metrics", 10, 10},
+		{"50sources_20metrics", 50, 20},
+		{"100sources_50metrics", 100, 50},
+		{"200sources_100metrics", 200, 100},
+	}
+
+	for _, scenario := range scenarios {
+		b.Run(scenario.name, func(b *testing.B) {
+			// Generate metrics ONCE - same input for both strategies
+			md := generateRealisticMetrics(scenario.numSources, scenario.metricsPerSource)
+			
+			// Calculate input data size
+			inputResourceMetrics := md.ResourceMetrics().Len()
+			inputTotalMetrics := 0
+			for i := 0; i < md.ResourceMetrics().Len(); i++ {
+				for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+					inputTotalMetrics += md.ResourceMetrics().At(i).ScopeMetrics().At(j).Metrics().Len()
+				}
+			}
+
+			b.Run("ResourceOnly", func(b *testing.B) {
+				config := createDefaultConfig().(*Config)
+				config.PartitionMetricsByResourceAttributes = true
+				config.PartitionMetricsRoutingKey = "resource"
+
+				messenger := &kafkaMetricsMessenger{config: *config}
+
+				b.ReportMetric(float64(inputResourceMetrics), "input_resources")
+				b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
+				b.ResetTimer()
+				b.ReportAllocs()
+
+				var totalPartitions int
+				var totalResourceMetrics int
+				var totalMetrics int
+
+				for i := 0; i < b.N; i++ {
+					partitions := 0
+					resourceMetrics := 0
+					metrics := 0
+					
+					for _, partitionedData := range messenger.partitionData(md) {
+						partitions++
+						resourceMetrics += partitionedData.ResourceMetrics().Len()
+						for j := 0; j < partitionedData.ResourceMetrics().Len(); j++ {
+							for k := 0; k < partitionedData.ResourceMetrics().At(j).ScopeMetrics().Len(); k++ {
+								metrics += partitionedData.ResourceMetrics().At(j).ScopeMetrics().At(k).Metrics().Len()
+							}
+						}
+					}
+					
+					totalPartitions = partitions
+					totalResourceMetrics = resourceMetrics
+					totalMetrics = metrics
+				}
+
+				b.ReportMetric(float64(totalPartitions), "output_partitions")
+				b.ReportMetric(float64(totalResourceMetrics), "output_resources")
+				b.ReportMetric(float64(totalMetrics), "output_metrics")
+			})
+
+			b.Run("ResourceAndMetric", func(b *testing.B) {
+				config := createDefaultConfig().(*Config)
+				config.PartitionMetricsByResourceAttributes = true
+				config.PartitionMetricsRoutingKey = "resource_and_metric"
+
+				messenger := &kafkaMetricsMessenger{config: *config}
+
+				b.ReportMetric(float64(inputResourceMetrics), "input_resources")
+				b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
+				b.ResetTimer()
+				b.ReportAllocs()
+
+				var totalPartitions int
+				var totalResourceMetrics int
+				var totalMetrics int
+
+				for i := 0; i < b.N; i++ {
+					partitions := 0
+					resourceMetrics := 0
+					metrics := 0
+					
+					for _, partitionedData := range messenger.partitionData(md) {
+						partitions++
+						resourceMetrics += partitionedData.ResourceMetrics().Len()
+						for j := 0; j < partitionedData.ResourceMetrics().Len(); j++ {
+							for k := 0; k < partitionedData.ResourceMetrics().At(j).ScopeMetrics().Len(); k++ {
+								metrics += partitionedData.ResourceMetrics().At(j).ScopeMetrics().At(k).Metrics().Len()
+							}
+						}
+					}
+					
+					totalPartitions = partitions
+					totalResourceMetrics = resourceMetrics
+					totalMetrics = metrics
+				}
+
+				b.ReportMetric(float64(totalPartitions), "output_partitions")
+				b.ReportMetric(float64(totalResourceMetrics), "output_resources")
+				b.ReportMetric(float64(totalMetrics), "output_metrics")
+			})
+		})
+	}
+}
+
+// BenchmarkMemoryPerPartition measures memory overhead per partition
+func BenchmarkMemoryPerPartition(b *testing.B) {
+	scenarios := []struct {
+		name             string
+		numSources       int
+		metricsPerSource int
+	}{
+		{"1source_100metrics", 1, 100},
+		{"1source_500metrics", 1, 500},
+		{"1source_1000metrics", 1, 1000},
+	}
+
+	for _, scenario := range scenarios {
+		md := generateRealisticMetrics(scenario.numSources, scenario.metricsPerSource)
+
+		b.Run(scenario.name, func(b *testing.B) {
+			b.Run("ResourceOnly", func(b *testing.B) {
+				config := createDefaultConfig().(*Config)
+				config.PartitionMetricsByResourceAttributes = true
+				config.PartitionMetricsRoutingKey = "resource"
+
+				messenger := &kafkaMetricsMessenger{config: *config}
+
+				b.ResetTimer()
+				b.ReportAllocs()
+
+				for i := 0; i < b.N; i++ {
+					var partitions int
+					for range messenger.partitionData(md) {
+						partitions++
+					}
+					if i == 0 {
+						b.ReportMetric(float64(partitions), "partitions")
+					}
+				}
+			})
+
+			b.Run("ResourceAndMetric", func(b *testing.B) {
+				config := createDefaultConfig().(*Config)
+				config.PartitionMetricsByResourceAttributes = true
+				config.PartitionMetricsRoutingKey = "resource_and_metric"
+
+				messenger := &kafkaMetricsMessenger{config: *config}
+
+				b.ResetTimer()
+				b.ReportAllocs()
+
+				for i := 0; i < b.N; i++ {
+					var partitions int
+					for range messenger.partitionData(md) {
+						partitions++
+					}
+					if i == 0 {
+						b.ReportMetric(float64(partitions), "partitions")
+					}
+				}
+			})
+		})
+	}
+}
+
+// BenchmarkMemoryComparison_200K tests with 200,000 metrics (200 sources × 1000 metrics)
+func BenchmarkMemoryComparison_200K(b *testing.B) {
+	// Generate 200K metrics: 200 sources × 1000 metrics each
+	md := generateRealisticMetrics(200, 1000)
+	
+	// Calculate input data size
+	inputResourceMetrics := md.ResourceMetrics().Len()
+	inputTotalMetrics := 0
+	for i := 0; i < md.ResourceMetrics().Len(); i++ {
+		for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+			inputTotalMetrics += md.ResourceMetrics().At(i).ScopeMetrics().At(j).Metrics().Len()
+		}
+	}
+
+	b.Logf("Input: %d sources, %d total metrics", inputResourceMetrics, inputTotalMetrics)
+
+	b.Run("ResourceOnly", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
+		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var totalPartitions int
+
+		for i := 0; i < b.N; i++ {
+			partitions := 0
+			for range messenger.partitionData(md) {
+				partitions++
+			}
+			totalPartitions = partitions
+		}
+
+		b.ReportMetric(float64(totalPartitions), "output_partitions")
+		b.Logf("Resource-Only: %d partitions created", totalPartitions)
+	})
+
+	b.Run("ResourceAndMetric", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource_and_metric"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
+		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var totalPartitions int
+
+		for i := 0; i < b.N; i++ {
+			partitions := 0
+			for range messenger.partitionData(md) {
+				partitions++
+			}
+			totalPartitions = partitions
+		}
+
+		b.ReportMetric(float64(totalPartitions), "output_partitions")
+		b.Logf("Resource+Metric: %d partitions created", totalPartitions)
+	})
+}
+
+// BenchmarkMemoryComparison_500K tests with 500,000 metrics (500 sources × 1000 metrics)
+func BenchmarkMemoryComparison_500K(b *testing.B) {
+	// Generate 500K metrics: 500 sources × 1000 metrics each
+	md := generateRealisticMetrics(500, 1000)
+	
+	// Calculate input data size
+	inputResourceMetrics := md.ResourceMetrics().Len()
+	inputTotalMetrics := 0
+	for i := 0; i < md.ResourceMetrics().Len(); i++ {
+		for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+			inputTotalMetrics += md.ResourceMetrics().At(i).ScopeMetrics().At(j).Metrics().Len()
+		}
+	}
+
+	b.Logf("Input: %d sources, %d total metrics", inputResourceMetrics, inputTotalMetrics)
+
+	b.Run("ResourceOnly", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
+		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var totalPartitions int
+
+		for i := 0; i < b.N; i++ {
+			partitions := 0
+			for range messenger.partitionData(md) {
+				partitions++
+			}
+			totalPartitions = partitions
+		}
+
+		b.ReportMetric(float64(totalPartitions), "output_partitions")
+		b.Logf("Resource-Only: %d partitions created", totalPartitions)
+	})
+
+	b.Run("ResourceAndMetric", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource_and_metric"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
+		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var totalPartitions int
+
+		for i := 0; i < b.N; i++ {
+			partitions := 0
+			for range messenger.partitionData(md) {
+				partitions++
+			}
+			totalPartitions = partitions
+		}
+
+		b.ReportMetric(float64(totalPartitions), "output_partitions")
+		b.Logf("Resource+Metric: %d partitions created", totalPartitions)
+	})
+}
+
+// BenchmarkBatchingEfficiency compares batched vs non-batched message counts and performance.
+// This benchmark demonstrates the impact of batching on message count and throughput.
+func BenchmarkBatchingEfficiency(b *testing.B) {
+	// Test with realistic scale: 100 sources × 50 metrics = 5,000 metrics
+	md := generateRealisticMetrics(100, 50)
+
+	inputResourceMetrics := md.ResourceMetrics().Len()
+	inputTotalMetrics := 0
+	for i := 0; i < md.ResourceMetrics().Len(); i++ {
+		for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+			inputTotalMetrics += md.ResourceMetrics().At(i).ScopeMetrics().At(j).Metrics().Len()
+		}
+	}
+
+	b.Logf("Input: %d sources, %d total metrics", inputResourceMetrics, inputTotalMetrics)
+
+	b.Run("ResourceOnly_Baseline", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var messageCount int
+		var totalMetricsInMessages int
+
+		for i := 0; i < b.N; i++ {
+			messages := 0
+			metricsCount := 0
+			for _, batch := range messenger.partitionData(md) {
+				messages++
+				// Count metrics in this batch
+				for ri := 0; ri < batch.ResourceMetrics().Len(); ri++ {
+					for si := 0; si < batch.ResourceMetrics().At(ri).ScopeMetrics().Len(); si++ {
+						metricsCount += batch.ResourceMetrics().At(ri).ScopeMetrics().At(si).Metrics().Len()
+					}
+				}
+			}
+			messageCount = messages
+			totalMetricsInMessages = metricsCount
+		}
+
+		avgMetricsPerMessage := float64(totalMetricsInMessages) / float64(messageCount)
+		b.ReportMetric(float64(messageCount), "messages")
+		b.ReportMetric(avgMetricsPerMessage, "metrics/message")
+		b.Logf("Messages: %d, Metrics/Message: %.1f", messageCount, avgMetricsPerMessage)
+	})
+
+	b.Run("ResourceAndMetric_Batched", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource_and_metric"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var messageCount int
+		var totalMetricsInMessages int
+
+		for i := 0; i < b.N; i++ {
+			messages := 0
+			metricsCount := 0
+			for _, batch := range messenger.partitionData(md) {
+				messages++
+				// Count metrics in this batch
+				for ri := 0; ri < batch.ResourceMetrics().Len(); ri++ {
+					for si := 0; si < batch.ResourceMetrics().At(ri).ScopeMetrics().Len(); si++ {
+						metricsCount += batch.ResourceMetrics().At(ri).ScopeMetrics().At(si).Metrics().Len()
+					}
+				}
+			}
+			messageCount = messages
+			totalMetricsInMessages = metricsCount
+		}
+
+		avgMetricsPerMessage := float64(totalMetricsInMessages) / float64(messageCount)
+		b.ReportMetric(float64(messageCount), "messages")
+		b.ReportMetric(avgMetricsPerMessage, "metrics/message")
+		b.Logf("Messages: %d, Metrics/Message: %.1f", messageCount, avgMetricsPerMessage)
+	})
+}
+
+// BenchmarkBatchingEfficiency_LargeScale tests batching with larger scale
+func BenchmarkBatchingEfficiency_LargeScale(b *testing.B) {
+	// Test with larger scale: 500 sources × 100 metrics = 50,000 metrics
+	md := generateRealisticMetrics(500, 100)
+
+	inputResourceMetrics := md.ResourceMetrics().Len()
+	inputTotalMetrics := 0
+	for i := 0; i < md.ResourceMetrics().Len(); i++ {
+		for j := 0; j < md.ResourceMetrics().At(i).ScopeMetrics().Len(); j++ {
+			inputTotalMetrics += md.ResourceMetrics().At(i).ScopeMetrics().At(j).Metrics().Len()
+		}
+	}
+
+	b.Logf("Input: %d sources, %d total metrics", inputResourceMetrics, inputTotalMetrics)
+
+	b.Run("ResourceOnly", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var messageCount int
+		var totalMetricsInMessages int
+
+		for i := 0; i < b.N; i++ {
+			messages := 0
+			metricsCount := 0
+			for _, batch := range messenger.partitionData(md) {
+				messages++
+				for ri := 0; ri < batch.ResourceMetrics().Len(); ri++ {
+					for si := 0; si < batch.ResourceMetrics().At(ri).ScopeMetrics().Len(); si++ {
+						metricsCount += batch.ResourceMetrics().At(ri).ScopeMetrics().At(si).Metrics().Len()
+					}
+				}
+			}
+			messageCount = messages
+			totalMetricsInMessages = metricsCount
+		}
+
+		avgMetricsPerMessage := float64(totalMetricsInMessages) / float64(messageCount)
+		b.ReportMetric(float64(messageCount), "messages")
+		b.ReportMetric(avgMetricsPerMessage, "metrics/message")
+		b.Logf("Messages: %d, Metrics/Message: %.1f", messageCount, avgMetricsPerMessage)
+	})
+
+	b.Run("ResourceAndMetric_Batched", func(b *testing.B) {
+		config := createDefaultConfig().(*Config)
+		config.PartitionMetricsByResourceAttributes = true
+		config.PartitionMetricsRoutingKey = "resource_and_metric"
+
+		messenger := &kafkaMetricsMessenger{config: *config}
+
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		var messageCount int
+		var totalMetricsInMessages int
+
+		for i := 0; i < b.N; i++ {
+			messages := 0
+			metricsCount := 0
+			for _, batch := range messenger.partitionData(md) {
+				messages++
+				for ri := 0; ri < batch.ResourceMetrics().Len(); ri++ {
+					for si := 0; si < batch.ResourceMetrics().At(ri).ScopeMetrics().Len(); si++ {
+						metricsCount += batch.ResourceMetrics().At(ri).ScopeMetrics().At(si).Metrics().Len()
+					}
+				}
+			}
+			messageCount = messages
+			totalMetricsInMessages = metricsCount
+		}
+
+		avgMetricsPerMessage := float64(totalMetricsInMessages) / float64(messageCount)
+		b.ReportMetric(float64(messageCount), "messages")
+		b.ReportMetric(avgMetricsPerMessage, "metrics/message")
+		b.Logf("Messages: %d, Metrics/Message: %.1f", messageCount, avgMetricsPerMessage)
+	})
+}
