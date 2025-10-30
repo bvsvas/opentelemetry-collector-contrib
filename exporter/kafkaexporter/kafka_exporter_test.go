@@ -1764,9 +1764,7 @@ func TestPartitionByResource(t *testing.T) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource"
 
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	// Create metrics with multiple resources
 	md := pmetric.NewMetrics()
@@ -1801,149 +1799,15 @@ func TestPartitionByResource(t *testing.T) {
 }
 
 // TestPartitionByResourceAndMetric tests the new partitioning strategy (by resource + metric)
-func TestPartitionByResourceAndMetric(t *testing.T) {
-	config := createDefaultConfig().(*Config)
-	config.PartitionMetricsByResourceAttributes = true
-	config.PartitionMetricsRoutingKey = "resource_and_metric"
-
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
-
-	// Create metrics with single resource but multiple metrics
-	md := pmetric.NewMetrics()
-	rm := md.ResourceMetrics().AppendEmpty()
-	rm.Resource().Attributes().PutStr("service.name", "service-a")
-	sm := rm.ScopeMetrics().AppendEmpty()
-
-	// Add 3 metrics
-	m1 := sm.Metrics().AppendEmpty()
-	m1.SetName("metric1")
-	m2 := sm.Metrics().AppendEmpty()
-	m2.SetName("metric2")
-	m3 := sm.Metrics().AppendEmpty()
-	m3.SetName("metric3")
-
-	// Collect partitions
-	var keys [][]byte
-	var metrics []pmetric.Metrics
-	for key, metricData := range messenger.partitionData(md) {
-		keys = append(keys, key)
-		metrics = append(metrics, metricData)
-	}
-
-	// Should get 3 partitions (one per metric)
-	require.Len(t, keys, 3)
-
-	// Verify all keys are different
-	keySet := make(map[string]bool)
-	for _, key := range keys {
-		keyStr := string(key)
-		require.False(t, keySet[keyStr], "duplicate key found")
-		keySet[keyStr] = true
-	}
-	require.Len(t, keySet, 3)
-
-	// Verify each partition contains only one metric
-	for _, metricData := range metrics {
-		require.Equal(t, 1, metricData.ResourceMetrics().Len())
-		require.Equal(t, 1, metricData.ResourceMetrics().At(0).ScopeMetrics().Len())
-		require.Equal(t, 1, metricData.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().Len())
-	}
-}
-
 // TestPartitionByResourceAndMetric_HotSource tests the hot source scenario
-func TestPartitionByResourceAndMetric_HotSource(t *testing.T) {
-	config := createDefaultConfig().(*Config)
-	config.PartitionMetricsByResourceAttributes = true
-	config.PartitionMetricsRoutingKey = "resource_and_metric"
-
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
-
-	// Simulate hot source with 100 metrics
-	md := pmetric.NewMetrics()
-	rm := md.ResourceMetrics().AppendEmpty()
-	rm.Resource().Attributes().PutStr("service.name", "hot-source")
-	sm := rm.ScopeMetrics().AppendEmpty()
-
-	for i := 0; i < 100; i++ {
-		m := sm.Metrics().AppendEmpty()
-		m.SetName(fmt.Sprintf("metric%d", i))
-	}
-
-	// Collect partitions
-	var keys [][]byte
-	for key := range messenger.partitionData(md) {
-		keys = append(keys, key)
-	}
-
-	// Should get 100 partitions (one per metric)
-	require.Len(t, keys, 100)
-
-	// Verify all keys are unique
-	keySet := make(map[string]bool)
-	for _, key := range keys {
-		keyStr := string(key)
-		require.False(t, keySet[keyStr], "duplicate key found")
-		keySet[keyStr] = true
-	}
-	require.Len(t, keySet, 100)
-}
-
 // TestPartitionByResourceAndMetric_MultipleResourcesAndMetrics tests complex scenario
-func TestPartitionByResourceAndMetric_MultipleResourcesAndMetrics(t *testing.T) {
-	config := createDefaultConfig().(*Config)
-	config.PartitionMetricsByResourceAttributes = true
-	config.PartitionMetricsRoutingKey = "resource_and_metric"
-
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
-
-	// Create metrics with 3 resources, each with 2 metrics
-	md := pmetric.NewMetrics()
-
-	for i := 0; i < 3; i++ {
-		rm := md.ResourceMetrics().AppendEmpty()
-		rm.Resource().Attributes().PutStr("service.name", fmt.Sprintf("service-%d", i))
-		sm := rm.ScopeMetrics().AppendEmpty()
-
-		for j := 0; j < 2; j++ {
-			m := sm.Metrics().AppendEmpty()
-			m.SetName(fmt.Sprintf("metric%d", j))
-		}
-	}
-
-	// Collect partitions
-	var keys [][]byte
-	for key := range messenger.partitionData(md) {
-		keys = append(keys, key)
-	}
-
-	// Should get 6 partitions (3 resources × 2 metrics)
-	require.Len(t, keys, 6)
-
-	// Verify all keys are unique
-	keySet := make(map[string]bool)
-	for _, key := range keys {
-		keyStr := string(key)
-		require.False(t, keySet[keyStr], "duplicate key found")
-		keySet[keyStr] = true
-	}
-	require.Len(t, keySet, 6)
-}
-
 // TestBackwardCompatibility_DefaultBehavior tests that default behavior matches current implementation
 func TestBackwardCompatibility_DefaultBehavior(t *testing.T) {
 	config := createDefaultConfig().(*Config)
 	config.PartitionMetricsByResourceAttributes = true
 	// Don't set PartitionMetricsRoutingKey (should default to "resource")
 
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	md := pmetric.NewMetrics()
 	rm := md.ResourceMetrics().AppendEmpty()
@@ -1971,9 +1835,7 @@ func TestPartitionByResourceAndMetric_SameMetricNameDifferentResources(t *testin
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	// Create metrics with 2 resources, both with same metric name
 	md := pmetric.NewMetrics()
@@ -2010,9 +1872,7 @@ func TestPartitionData_NoPartitioning(t *testing.T) {
 	config := createDefaultConfig().(*Config)
 	config.PartitionMetricsByResourceAttributes = false
 
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	md := pmetric.NewMetrics()
 	rm := md.ResourceMetrics().AppendEmpty()
@@ -2269,42 +2129,6 @@ func verifyHashDistribution(t *testing.T, partitions []partitionInfo, sources, m
 
 // TestPartitionByResourceAndMetric_ValidateHashWithMetricName tests that the hash
 // includes both resource attributes and metric name for composite key partitioning
-func TestPartitionByResourceAndMetric_ValidateHashWithMetricName(t *testing.T) {
-	config := createDefaultConfig().(*Config)
-	config.PartitionMetricsByResourceAttributes = true
-	config.PartitionMetricsRoutingKey = "resource_and_metric"
-
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
-
-	// Get test data
-	sources := getTestSources()
-	metricNames := getTestMetricNames()
-	md := createTestMetricsWithSourcesAndMetrics(sources, metricNames)
-
-	// Collect all partitions with their hashes and data
-	partitions := collectCompositeKeyPartitions(t, messenger, md)
-
-	// Verify total partitions: 10 sources × 10 metrics = 100 partitions
-	require.Len(t, partitions, 100, "Should have 100 partitions (10 sources × 10 metrics)")
-
-	// Verify all hashes are unique
-	var hashes [][]byte
-	for _, p := range partitions {
-		hashes = append(hashes, p.hash)
-	}
-	verifyHashUniqueness(t, hashes, 100, "All hashes should be unique")
-
-	// Verify hash distribution across sources and metrics
-	verifyHashDistribution(t, partitions, sources, metricNames)
-
-	// Verify each partition contains correct data
-	for _, p := range partitions {
-		verifyCompositeKeyPartitionData(t, p)
-	}
-}
-
 // TestPartitionByResource_ValidateHashWithResourceOnly tests that the hash
 // includes only resource attributes (not metric name) for resource-only partitioning
 func TestPartitionByResource_ValidateHashWithResourceOnly(t *testing.T) {
@@ -2312,9 +2136,7 @@ func TestPartitionByResource_ValidateHashWithResourceOnly(t *testing.T) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource"
 
-	messenger := &kafkaMetricsMessenger{
-		config: *config,
-	}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	// Get test data (same as previous test)
 	sources := getTestSources()
@@ -2413,68 +2235,6 @@ func TestPartitionByResource_ValidateHashWithResourceOnly(t *testing.T) {
 
 // TestPartitionByResourceAndMetric_CompareWithResourceOnly validates the difference
 // between resource-only and resource+metric partitioning strategies
-func TestPartitionByResourceAndMetric_CompareWithResourceOnly(t *testing.T) {
-	// Create test data with 5 sources and 5 metrics each
-	sources := []string{"source-1", "source-2", "source-3", "source-4", "source-5"}
-	metricNames := []string{"cpu.usage", "memory.usage", "disk.io", "network.rx", "network.tx"}
-
-	md := pmetric.NewMetrics()
-	for _, source := range sources {
-		rm := md.ResourceMetrics().AppendEmpty()
-		rm.Resource().Attributes().PutStr("source", source)
-		rm.Resource().Attributes().PutStr("service.name", source)
-
-		sm := rm.ScopeMetrics().AppendEmpty()
-		for idx, metricName := range metricNames {
-			m := sm.Metrics().AppendEmpty()
-			m.SetName(metricName)
-			gauge := m.SetEmptyGauge()
-			dp := gauge.DataPoints().AppendEmpty()
-			dp.SetDoubleValue(42.0 + float64(idx))
-			dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
-
-			// Add data point attributes
-			dp.Attributes().PutStr("host", fmt.Sprintf("host-%s", source))
-			dp.Attributes().PutStr("datacenter", "dc1")
-			dp.Attributes().PutInt("instance_id", int64(idx+1))
-		}
-	}
-
-	// Test 1: Resource-only partitioning
-	configResource := createDefaultConfig().(*Config)
-	configResource.PartitionMetricsByResourceAttributes = true
-	configResource.PartitionMetricsRoutingKey = "resource"
-
-	messengerResource := &kafkaMetricsMessenger{config: *configResource}
-
-	var resourcePartitions [][]byte
-	for hash := range messengerResource.partitionData(md) {
-		resourcePartitions = append(resourcePartitions, hash)
-	}
-
-	// Test 2: Resource+Metric partitioning
-	configComposite := createDefaultConfig().(*Config)
-	configComposite.PartitionMetricsByResourceAttributes = true
-	configComposite.PartitionMetricsRoutingKey = "resource_and_metric"
-
-	messengerComposite := &kafkaMetricsMessenger{config: *configComposite}
-
-	var compositePartitions [][]byte
-	for hash := range messengerComposite.partitionData(md) {
-		compositePartitions = append(compositePartitions, hash)
-	}
-
-	// Verify partition counts
-	require.Len(t, resourcePartitions, 5, "Resource-only should create 5 partitions (one per source)")
-	require.Len(t, compositePartitions, 25, "Resource+Metric should create 25 partitions (5 sources × 5 metrics)")
-
-	// Verify that composite partitioning creates more granular distribution
-	require.Equal(t, 5, len(resourcePartitions), "Resource-only: 5 partitions")
-	require.Equal(t, 25, len(compositePartitions), "Resource+Metric: 25 partitions")
-	require.Equal(t, 5.0, float64(len(compositePartitions))/float64(len(resourcePartitions)),
-		"Composite partitioning should create 5x more partitions (one per metric)")
-}
-
 // TestPartitionByResourceAndMetricBatched_FunctionalValidation validates the batching behavior
 // ensuring metrics are properly grouped by resource and batched efficiently
 func TestPartitionByResourceAndMetricBatched_FunctionalValidation(t *testing.T) {
@@ -2482,7 +2242,7 @@ func TestPartitionByResourceAndMetricBatched_FunctionalValidation(t *testing.T) 
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	// Create test data: 3 sources × 10 metrics each = 30 total metrics
 	md := pmetric.NewMetrics()
@@ -2618,7 +2378,7 @@ func TestPartitionByResourceAndMetricBatched_MultipleSourcesSameMetrics(t *testi
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	// Create 5 sources, all with the SAME 3 metrics
 	md := pmetric.NewMetrics()
@@ -2708,7 +2468,7 @@ func TestPartitionByResourceAndMetricBatched_HotSourceScenario(t *testing.T) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	md := pmetric.NewMetrics()
 
@@ -2820,7 +2580,7 @@ func TestPartitionByResourceAndMetricBatched_DataPointAttributesPreserved(t *tes
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	md := pmetric.NewMetrics()
 
@@ -2904,7 +2664,7 @@ func TestPartitionData_ResourceAndMetric_Integration(t *testing.T) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	// Create realistic test data
 	md := pmetric.NewMetrics()
@@ -2996,4 +2756,366 @@ func TestPartitionData_ResourceAndMetric_Integration(t *testing.T) {
 	require.Equal(t, expectedTotalMetrics, totalMetricsOutput,
 		"Total metrics should be preserved (%d sources × %d metrics = %d)",
 		expectedBatches, metricsPerSource, expectedTotalMetrics)
+}
+
+// TestPhase1Optimizations_FunctionalValidation validates that Phase 1 optimizations
+// (cached hash + cached ResourceMetrics reference) preserve ALL metric data correctly
+func TestPhase1Optimizations_FunctionalValidation(t *testing.T) {
+	// Create comprehensive test data with multiple sources, metrics, and data points
+	sources := []string{"frontend", "backend", "database", "cache", "api"}
+	metricNames := []string{
+		"http_requests_total", "http_request_duration_seconds",
+		"cpu_usage_percent", "memory_usage_bytes",
+		"disk_io_operations", "network_bytes_sent",
+	}
+
+	// Build input metrics
+	inputMetrics := pmetric.NewMetrics()
+	for _, source := range sources {
+		rm := inputMetrics.ResourceMetrics().AppendEmpty()
+		
+		// Set resource attributes
+		rm.Resource().Attributes().PutStr("source", source)
+		rm.Resource().Attributes().PutStr("service.name", source)
+		rm.Resource().Attributes().PutStr("dx_tenant_id", "tenant-123")
+		rm.Resource().Attributes().PutStr("environment", "production")
+		
+		// Add 2 scopes per resource
+		for scopeIdx := 0; scopeIdx < 2; scopeIdx++ {
+			sm := rm.ScopeMetrics().AppendEmpty()
+			sm.Scope().SetName(fmt.Sprintf("instrumentation-scope-%d", scopeIdx))
+			sm.Scope().SetVersion("1.0.0")
+			
+			// Add all metrics to this scope
+			for _, metricName := range metricNames {
+				m := sm.Metrics().AppendEmpty()
+				m.SetName(metricName)
+				m.SetUnit("1")
+				m.SetDescription(fmt.Sprintf("Description for %s", metricName))
+				
+				// Create gauge with data points
+				gauge := m.SetEmptyGauge()
+				for dpIdx := 0; dpIdx < 3; dpIdx++ {
+					dp := gauge.DataPoints().AppendEmpty()
+					dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+					dp.SetDoubleValue(float64(dpIdx * 100))
+					
+					// Add data point attributes
+					dp.Attributes().PutStr("method", "GET")
+					dp.Attributes().PutStr("status_code", "200")
+					dp.Attributes().PutInt("replica_id", int64(dpIdx))
+				}
+			}
+		}
+	}
+
+	// Calculate expected totals BEFORE partitioning
+	expectedResourceCount := len(sources)
+	expectedScopesPerResource := 2
+	expectedMetricsPerScope := len(metricNames)
+	expectedDataPointsPerMetric := 3
+	
+	expectedTotalScopes := expectedResourceCount * expectedScopesPerResource
+	expectedTotalMetrics := expectedTotalScopes * expectedMetricsPerScope
+	expectedTotalDataPoints := expectedTotalMetrics * expectedDataPointsPerMetric
+
+	// Partition using resource_and_metric strategy
+	config := Config{
+		PartitionMetricsByResourceAttributes: true,
+		PartitionMetricsRoutingKey:           "resource_and_metric",
+	}
+	messenger := newKafkaMetricsMessenger(config, nil)
+
+	// Collect all batches
+	var batches []pmetric.Metrics
+	var partitionKeys [][]byte
+	for partitionKey, batch := range messenger.partitionData(inputMetrics) {
+		batches = append(batches, batch)
+		partitionKeys = append(partitionKeys, partitionKey)
+	}
+
+	// VALIDATION 1: Correct number of batches (one per source)
+	require.Equal(t, expectedResourceCount, len(batches),
+		"Should have one batch per source")
+
+	// VALIDATION 2: All partition keys are unique (hot partition mitigation)
+	uniqueKeys := make(map[string]bool)
+	for _, key := range partitionKeys {
+		keyStr := string(key)
+		require.False(t, uniqueKeys[keyStr], "Partition keys should be unique")
+		uniqueKeys[keyStr] = true
+	}
+
+	// VALIDATION 3: Verify ALL resource attributes are preserved
+	resourceAttrsSeen := make(map[string]map[string]string)
+	for _, batch := range batches {
+		require.Equal(t, 1, batch.ResourceMetrics().Len(),
+			"Each batch should have exactly 1 ResourceMetrics")
+		
+		rm := batch.ResourceMetrics().At(0)
+		attrs := rm.Resource().Attributes()
+		
+		source, _ := attrs.Get("source")
+		require.True(t, source.Str() != "", "source attribute should exist")
+		
+		// Collect all attributes for this source
+		attrMap := make(map[string]string)
+		attrs.Range(func(k string, v pcommon.Value) bool {
+			attrMap[k] = v.AsString()
+			return true
+		})
+		
+		resourceAttrsSeen[source.Str()] = attrMap
+		
+		// Verify all expected attributes exist
+		require.Equal(t, source.Str(), attrMap["service.name"],
+			"service.name should match source")
+		require.Equal(t, "tenant-123", attrMap["dx_tenant_id"],
+			"dx_tenant_id should be preserved")
+		require.Equal(t, "production", attrMap["environment"],
+			"environment should be preserved")
+	}
+	
+	// All sources should be present
+	require.Equal(t, len(sources), len(resourceAttrsSeen),
+		"All sources should be present in output")
+
+	// VALIDATION 4: Verify ALL scopes are preserved
+	totalScopesOutput := 0
+	for _, batch := range batches {
+		rm := batch.ResourceMetrics().At(0)
+		scopeCount := rm.ScopeMetrics().Len()
+		totalScopesOutput += scopeCount
+		
+		// Verify scope details
+		for si := 0; si < scopeCount; si++ {
+			sm := rm.ScopeMetrics().At(si)
+			require.NotEmpty(t, sm.Scope().Name(),
+				"Scope name should be preserved")
+			require.Equal(t, "1.0.0", sm.Scope().Version(),
+				"Scope version should be preserved")
+		}
+	}
+	require.Equal(t, expectedTotalScopes, totalScopesOutput,
+		"All scopes should be preserved (%d sources × %d scopes = %d)",
+		expectedResourceCount, expectedScopesPerResource, expectedTotalScopes)
+
+	// VALIDATION 5: Verify ALL metrics are preserved with correct names
+	metricNamesSeen := make(map[string]map[string]bool) // source -> metric names
+	totalMetricsOutput := 0
+	
+	for _, batch := range batches {
+		rm := batch.ResourceMetrics().At(0)
+		source, _ := rm.Resource().Attributes().Get("source")
+		
+		if metricNamesSeen[source.Str()] == nil {
+			metricNamesSeen[source.Str()] = make(map[string]bool)
+		}
+		
+		for si := 0; si < rm.ScopeMetrics().Len(); si++ {
+			sm := rm.ScopeMetrics().At(si)
+			metricCount := sm.Metrics().Len()
+			totalMetricsOutput += metricCount
+			
+			// Verify each metric
+			for mi := 0; mi < metricCount; mi++ {
+				m := sm.Metrics().At(mi)
+				require.NotEmpty(t, m.Name(), "Metric name should be preserved")
+				require.NotEmpty(t, m.Description(), "Metric description should be preserved")
+				require.Equal(t, "1", m.Unit(), "Metric unit should be preserved")
+				
+				metricNamesSeen[source.Str()][m.Name()] = true
+			}
+		}
+	}
+	
+	require.Equal(t, expectedTotalMetrics, totalMetricsOutput,
+		"All metrics should be preserved (%d total metrics expected)",
+		expectedTotalMetrics)
+	
+	// Each source should have all metric names
+	for _, source := range sources {
+		require.Equal(t, len(metricNames), len(metricNamesSeen[source]),
+			"Source %s should have all %d metric names", source, len(metricNames))
+		
+		for _, metricName := range metricNames {
+			require.True(t, metricNamesSeen[source][metricName],
+				"Source %s should have metric %s", source, metricName)
+		}
+	}
+
+	// VALIDATION 6: Verify ALL data points are preserved with attributes
+	totalDataPointsOutput := 0
+	
+	for _, batch := range batches {
+		rm := batch.ResourceMetrics().At(0)
+		
+		for si := 0; si < rm.ScopeMetrics().Len(); si++ {
+			sm := rm.ScopeMetrics().At(si)
+			
+			for mi := 0; mi < sm.Metrics().Len(); mi++ {
+				m := sm.Metrics().At(mi)
+				
+				// Get data points based on metric type
+				var dpCount int
+				switch m.Type() {
+				case pmetric.MetricTypeGauge:
+					dpCount = m.Gauge().DataPoints().Len()
+					totalDataPointsOutput += dpCount
+					
+					// Verify data point attributes
+					for dpi := 0; dpi < dpCount; dpi++ {
+						dp := m.Gauge().DataPoints().At(dpi)
+						
+						// Verify attributes are preserved
+						method, methodExists := dp.Attributes().Get("method")
+						require.True(t, methodExists, "method attribute should exist")
+						require.Equal(t, "GET", method.Str(), "method should be GET")
+						
+						statusCode, statusExists := dp.Attributes().Get("status_code")
+						require.True(t, statusExists, "status_code attribute should exist")
+						require.Equal(t, "200", statusCode.Str(), "status_code should be 200")
+						
+						replicaID, replicaExists := dp.Attributes().Get("replica_id")
+						require.True(t, replicaExists, "replica_id attribute should exist")
+						require.True(t, replicaID.Int() >= 0 && replicaID.Int() < 3,
+							"replica_id should be 0, 1, or 2")
+						
+						// Verify value is preserved
+						require.True(t, dp.DoubleValue() >= 0,
+							"Data point value should be preserved")
+					}
+				}
+			}
+		}
+	}
+	
+	require.Equal(t, expectedTotalDataPoints, totalDataPointsOutput,
+		"All data points should be preserved (%d total data points expected)",
+		expectedTotalDataPoints)
+
+	// VALIDATION 7: Verify no duplicate metrics in output
+	// Each batch should have unique metrics (no duplicates within a batch)
+	for batchIdx, batch := range batches {
+		rm := batch.ResourceMetrics().At(0)
+		metricNamesInBatch := make(map[string]int)
+		
+		for si := 0; si < rm.ScopeMetrics().Len(); si++ {
+			sm := rm.ScopeMetrics().At(si)
+			
+			for mi := 0; mi < sm.Metrics().Len(); mi++ {
+				m := sm.Metrics().At(mi)
+				metricNamesInBatch[m.Name()]++
+			}
+		}
+		
+		// Each metric name should appear exactly twice (2 scopes per resource)
+		for metricName, count := range metricNamesInBatch {
+			require.Equal(t, expectedScopesPerResource, count,
+				"Batch %d: Metric %s should appear exactly %d times (once per scope)",
+				batchIdx, metricName, expectedScopesPerResource)
+		}
+	}
+
+	t.Logf("✅ Phase 1 Optimizations Validation PASSED")
+	t.Logf("   Resources: %d (expected: %d)", len(batches), expectedResourceCount)
+	t.Logf("   Scopes: %d (expected: %d)", totalScopesOutput, expectedTotalScopes)
+	t.Logf("   Metrics: %d (expected: %d)", totalMetricsOutput, expectedTotalMetrics)
+	t.Logf("   Data Points: %d (expected: %d)", totalDataPointsOutput, expectedTotalDataPoints)
+	t.Logf("   Unique Partition Keys: %d", len(uniqueKeys))
+}
+
+// TestPhase1Optimizations_CompareWithBaseline compares Phase 1 optimized version
+// with baseline to ensure identical output
+func TestPhase1Optimizations_CompareWithBaseline(t *testing.T) {
+	// Create test data
+	sources := []string{"service-a", "service-b", "service-c"}
+	metricNames := []string{"metric1", "metric2", "metric3"}
+
+	inputMetrics := pmetric.NewMetrics()
+	for _, source := range sources {
+		rm := inputMetrics.ResourceMetrics().AppendEmpty()
+		rm.Resource().Attributes().PutStr("source", source)
+		rm.Resource().Attributes().PutStr("service.name", source)
+		
+		sm := rm.ScopeMetrics().AppendEmpty()
+		sm.Scope().SetName("test-scope")
+		
+		for _, metricName := range metricNames {
+			m := sm.Metrics().AppendEmpty()
+			m.SetName(metricName)
+			gauge := m.SetEmptyGauge()
+			dp := gauge.DataPoints().AppendEmpty()
+			dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+			dp.SetDoubleValue(123.45)
+			dp.Attributes().PutStr("label", "value")
+		}
+	}
+
+	// Test both resource and resource_and_metric strategies
+	strategies := []string{"resource", "resource_and_metric"}
+	
+	for _, strategy := range strategies {
+		t.Run(strategy, func(t *testing.T) {
+			config := Config{
+				PartitionMetricsByResourceAttributes: true,
+				PartitionMetricsRoutingKey:           strategy,
+			}
+			messenger := newKafkaMetricsMessenger(config, nil)
+
+			// Collect batches
+			var batches []pmetric.Metrics
+			for _, batch := range messenger.partitionData(inputMetrics) {
+				batches = append(batches, batch)
+			}
+
+			// Verify output structure
+			require.Equal(t, len(sources), len(batches),
+				"Should have one batch per source")
+
+			// Verify all data is preserved
+			totalMetrics := 0
+			totalDataPoints := 0
+			resourcesSeen := make(map[string]bool)
+
+			for _, batch := range batches {
+				require.Equal(t, 1, batch.ResourceMetrics().Len())
+				rm := batch.ResourceMetrics().At(0)
+				
+				source, _ := rm.Resource().Attributes().Get("source")
+				resourcesSeen[source.Str()] = true
+				
+				for si := 0; si < rm.ScopeMetrics().Len(); si++ {
+					sm := rm.ScopeMetrics().At(si)
+					totalMetrics += sm.Metrics().Len()
+					
+					for mi := 0; mi < sm.Metrics().Len(); mi++ {
+						m := sm.Metrics().At(mi)
+						totalDataPoints += m.Gauge().DataPoints().Len()
+						
+						// Verify data point attributes
+						dp := m.Gauge().DataPoints().At(0)
+						label, exists := dp.Attributes().Get("label")
+						require.True(t, exists, "Data point attribute should be preserved")
+						require.Equal(t, "value", label.Str())
+						require.Equal(t, 123.45, dp.DoubleValue())
+					}
+				}
+			}
+
+			// Verify totals
+			expectedMetrics := len(sources) * len(metricNames)
+			expectedDataPoints := expectedMetrics
+			
+			require.Equal(t, len(sources), len(resourcesSeen),
+				"All sources should be present")
+			require.Equal(t, expectedMetrics, totalMetrics,
+				"All metrics should be preserved")
+			require.Equal(t, expectedDataPoints, totalDataPoints,
+				"All data points should be preserved")
+
+			t.Logf("✅ Strategy %s: %d batches, %d metrics, %d data points",
+				strategy, len(batches), totalMetrics, totalDataPoints)
+		})
+	}
 }

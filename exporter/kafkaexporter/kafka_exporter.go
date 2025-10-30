@@ -294,16 +294,47 @@ func newMetricsExporter(config Config, set exporter.Settings) *kafkaExporter[pme
 		if err != nil {
 			return nil, err
 		}
-		return &kafkaMetricsMessenger{
-			config:    config,
-			marshaler: marshaler,
-		}, nil
+		return newKafkaMetricsMessenger(config, marshaler), nil
 	})
 }
 
+// routingStrategy defines the partitioning strategy for metrics
+type routingStrategy int
+
+const (
+	routingStrategyNone routingStrategy = iota
+	routingStrategyResource
+	routingStrategyResourceAndMetric
+)
+
 type kafkaMetricsMessenger struct {
-	config    Config
-	marshaler marshaler.MetricsMarshaler
+	config          Config
+	marshaler       marshaler.MetricsMarshaler
+	routingStrategy routingStrategy // Cached routing strategy to avoid string comparison on every call
+}
+
+// newKafkaMetricsMessenger creates a new kafkaMetricsMessenger with properly initialized routing strategy
+func newKafkaMetricsMessenger(config Config, marshaler marshaler.MetricsMarshaler) *kafkaMetricsMessenger {
+	// Determine and cache routing strategy to avoid string comparison on every call
+	strategy := routingStrategyNone
+	if config.PartitionMetricsByResourceAttributes {
+		routingKey := config.PartitionMetricsRoutingKey
+		if routingKey == "" {
+			routingKey = "resource" // default
+		}
+		switch routingKey {
+		case "resource_and_metric":
+			strategy = routingStrategyResourceAndMetric
+		default: // "resource"
+			strategy = routingStrategyResource
+		}
+	}
+
+	return &kafkaMetricsMessenger{
+		config:          config,
+		marshaler:       marshaler,
+		routingStrategy: strategy,
+	}
 }
 
 func (e *kafkaMetricsMessenger) marshalData(md pmetric.Metrics) ([]marshaler.Message, error) {
@@ -316,22 +347,14 @@ func (e *kafkaMetricsMessenger) getTopic(ctx context.Context, md pmetric.Metrics
 
 func (e *kafkaMetricsMessenger) partitionData(md pmetric.Metrics) iter.Seq2[[]byte, pmetric.Metrics] {
 	return func(yield func([]byte, pmetric.Metrics) bool) {
-		if !e.config.PartitionMetricsByResourceAttributes {
+		// Use cached routing strategy to avoid string comparison on every call
+		switch e.routingStrategy {
+		case routingStrategyNone:
 			// No partitioning: all metrics go to default partition
 			yield(nil, md)
-			return
-		}
-
-		// Determine routing strategy
-		routingKey := e.config.PartitionMetricsRoutingKey
-		if routingKey == "" {
-			routingKey = "resource" // default
-		}
-
-		switch routingKey {
-		case "resource_and_metric":
+		case routingStrategyResourceAndMetric:
 			e.partitionByResourceAndMetricBatched(md, yield)
-		default: // "resource"
+		case routingStrategyResource:
 			e.partitionByResource(md, yield)
 		}
 	}
@@ -402,10 +425,19 @@ func (e *kafkaMetricsMessenger) partitionByResourceAndMetricBatched(md pmetric.M
 		// Get or create batch for this resource
 		batch, exists := resourceBatches[resourceHash]
 		if !exists {
+			// Create new batch with optimizations:
+			// 1. Cache resource hash to avoid recalculation
+			// 2. Cache ResourceMetrics reference for O(1) access
+			metrics := pmetric.NewMetrics()
+			rm := metrics.ResourceMetrics().AppendEmpty()
+			resource.CopyTo(rm.Resource())
+
 			batch = &resourceMetricBatch{
-				metrics:     pmetric.NewMetrics(),
-				resource:    resource,
-				metricNames: make([]string, 0, 50), // Preallocate for common case
+				metrics:         metrics,
+				resource:        resource,
+				resourceHash:    resourceHash,           // OPTIMIZATION: Cache hash
+				resourceMetrics: rm,                     // OPTIMIZATION: Cache ResourceMetrics reference
+				metricNames:     make([]string, 0, 150), // Preallocate for common case
 			}
 			resourceBatches[resourceHash] = batch
 		}
@@ -417,7 +449,7 @@ func (e *kafkaMetricsMessenger) partitionByResourceAndMetricBatched(md pmetric.M
 				batch.metricNames = append(batch.metricNames, metric.Name())
 			}
 
-			// Add entire scope to batch
+			// Add entire scope to batch (includes ALL metrics in the ScopeMetrics array)
 			batch.addScopeMetrics(resource, scopeMetrics)
 		}
 	}
@@ -436,35 +468,41 @@ func (e *kafkaMetricsMessenger) partitionByResourceAndMetricBatched(md pmetric.M
 // resourceMetricBatch accumulates all metrics from a single resource
 // for efficient batching while still enabling composite partition keys
 type resourceMetricBatch struct {
-	metrics     pmetric.Metrics
-	resource    pcommon.Resource
-	metricNames []string // Collected metric names for composite hash calculation
+	metrics         pmetric.Metrics
+	resource        pcommon.Resource
+	resourceHash    [16]byte                // Cached hash of resource attributes (optimization)
+	resourceMetrics pmetric.ResourceMetrics // Cached ResourceMetrics reference (optimization)
+	metricNames     []string                // Collected metric names for composite hash calculation
+
+	// Capacity tracking for observability and debugging
+	totalMetrics int // Total number of metrics added to this batch
+	totalScopes  int // Total number of scopes added to this batch
 }
 
-// addScopeMetrics adds an entire ScopeMetrics to the batch
+// addScopeMetrics adds an entire ScopeMetrics to the batch.
+//
+// CRITICAL: This method copies the ENTIRE ScopeMetrics structure, which includes:
+//   - ALL metrics in the Metrics array (no metrics are skipped)
+//   - The Scope (InstrumentationScope) information
+//   - The SchemaUrl
+//
+// DATA INTEGRITY GUARANTEE:
+//   - Zero data loss: ALL metrics from the input ScopeMetrics are preserved
+//   - Zero duplication: Each metric is copied exactly once
+//   - Deep copy: scopeMetrics.CopyTo() performs a complete deep copy of all fields
+//
+// OPTIMIZATION: Uses cached ResourceMetrics reference for O(1) access instead of O(N) iteration
 func (b *resourceMetricBatch) addScopeMetrics(resource pcommon.Resource, scopeMetrics pmetric.ScopeMetrics) {
-	// Find or create ResourceMetrics for this resource
-	var rm pmetric.ResourceMetrics
-	found := false
+	// Track the number of metrics in this scope BEFORE copying
+	metricsInScope := scopeMetrics.Metrics().Len()
 
-	// Check if we already have a ResourceMetrics for this resource
-	for i := 0; i < b.metrics.ResourceMetrics().Len(); i++ {
-		existing := b.metrics.ResourceMetrics().At(i)
-		// Compare by hash for efficiency
-		if pdatautil.MapHash(existing.Resource().Attributes()) == pdatautil.MapHash(resource.Attributes()) {
-			rm = existing
-			found = true
-			break
-		}
-	}
+	// Copy the entire ScopeMetrics (includes ALL metrics in the Metrics array)
+	// This is a deep copy operation that preserves all data
+	scopeMetrics.CopyTo(b.resourceMetrics.ScopeMetrics().AppendEmpty())
 
-	if !found {
-		rm = b.metrics.ResourceMetrics().AppendEmpty()
-		resource.CopyTo(rm.Resource())
-	}
-
-	// Copy the entire ScopeMetrics
-	scopeMetrics.CopyTo(rm.ScopeMetrics().AppendEmpty())
+	// Update capacity tracking for observability
+	b.totalScopes++
+	b.totalMetrics += metricsInScope
 }
 
 // calculatePartitionKey creates a composite hash from resource attributes + metric names

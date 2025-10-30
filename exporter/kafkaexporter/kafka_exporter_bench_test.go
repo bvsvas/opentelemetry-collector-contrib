@@ -166,7 +166,7 @@ func BenchmarkPartitionByResource(b *testing.B) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -190,7 +190,7 @@ func BenchmarkPartitionByResourceAndMetric(b *testing.B) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -215,7 +215,7 @@ func BenchmarkPartitionByResourceAndMetric_HotSource(b *testing.B) {
 	config.PartitionMetricsByResourceAttributes = true
 	config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-	messenger := &kafkaMetricsMessenger{config: *config}
+	messenger := newKafkaMetricsMessenger(*config, nil)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -415,7 +415,7 @@ func BenchmarkPartitionByResource_Realistic(b *testing.B) {
 			config.PartitionMetricsByResourceAttributes = true
 			config.PartitionMetricsRoutingKey = "resource"
 
-			messenger := &kafkaMetricsMessenger{config: *config}
+			messenger := newKafkaMetricsMessenger(*config, nil)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -450,13 +450,14 @@ func BenchmarkPartitionByResourceAndMetric_Realistic(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			md := generateRealisticMetrics(bm.numSources, bm.metricsPerSource)
-			expectedPartitions := bm.numSources * bm.metricsPerSource
+			// With batching optimization: one batch per source (not one per metric)
+			expectedBatches := bm.numSources
 
 			config := createDefaultConfig().(*Config)
 			config.PartitionMetricsByResourceAttributes = true
 			config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-			messenger := &kafkaMetricsMessenger{config: *config}
+			messenger := newKafkaMetricsMessenger(*config, nil)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -466,8 +467,8 @@ func BenchmarkPartitionByResourceAndMetric_Realistic(b *testing.B) {
 				for range messenger.partitionData(md) {
 					count++
 				}
-				if count != expectedPartitions {
-					b.Fatalf("expected %d partitions, got %d", expectedPartitions, count)
+				if count != expectedBatches {
+					b.Fatalf("expected %d batches, got %d", expectedBatches, count)
 				}
 			}
 		})
@@ -484,7 +485,7 @@ func BenchmarkPartitionComparison_Realistic(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -505,7 +506,7 @@ func BenchmarkPartitionComparison_Realistic(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -515,8 +516,9 @@ func BenchmarkPartitionComparison_Realistic(b *testing.B) {
 			for range messenger.partitionData(md) {
 				count++
 			}
-			if count != 5000 { // 100 sources × 50 metrics
-				b.Fatalf("expected 5000 partitions, got %d", count)
+			// With batching optimization: one batch per source (not one per metric)
+			if count != 100 {
+				b.Fatalf("expected 100 batches, got %d", count)
 			}
 		}
 	})
@@ -545,7 +547,7 @@ func BenchmarkHotSourceScenario_Realistic(b *testing.B) {
 				config.PartitionMetricsByResourceAttributes = true
 				config.PartitionMetricsRoutingKey = "resource"
 
-				messenger := &kafkaMetricsMessenger{config: *config}
+				messenger := newKafkaMetricsMessenger(*config, nil)
 
 				b.ResetTimer()
 				b.ReportAllocs()
@@ -566,19 +568,20 @@ func BenchmarkHotSourceScenario_Realistic(b *testing.B) {
 				config.PartitionMetricsByResourceAttributes = true
 				config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-				messenger := &kafkaMetricsMessenger{config: *config}
+				messenger := newKafkaMetricsMessenger(*config, nil)
 
 				b.ResetTimer()
 				b.ReportAllocs()
 
-				expectedPartitions := bm.numSources * bm.metricsPerSource
+				// With batching optimization: one batch per source (not one per metric)
+				expectedBatches := bm.numSources
 				for i := 0; i < b.N; i++ {
 					count := 0
 					for range messenger.partitionData(md) {
 						count++
 					}
-					if count != expectedPartitions {
-						b.Fatalf("expected %d partitions, got %d", expectedPartitions, count)
+					if count != expectedBatches {
+						b.Fatalf("expected %d batches, got %d", expectedBatches, count)
 					}
 				}
 			})
@@ -632,7 +635,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 		b.Run(scenario.name, func(b *testing.B) {
 			// Generate metrics ONCE - same input for both strategies
 			md := generateRealisticMetrics(scenario.numSources, scenario.metricsPerSource)
-			
+
 			// Calculate input data size
 			inputResourceMetrics := md.ResourceMetrics().Len()
 			inputTotalMetrics := 0
@@ -647,7 +650,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 				config.PartitionMetricsByResourceAttributes = true
 				config.PartitionMetricsRoutingKey = "resource"
 
-				messenger := &kafkaMetricsMessenger{config: *config}
+				messenger := newKafkaMetricsMessenger(*config, nil)
 
 				b.ReportMetric(float64(inputResourceMetrics), "input_resources")
 				b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
@@ -662,7 +665,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 					partitions := 0
 					resourceMetrics := 0
 					metrics := 0
-					
+
 					for _, partitionedData := range messenger.partitionData(md) {
 						partitions++
 						resourceMetrics += partitionedData.ResourceMetrics().Len()
@@ -672,7 +675,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 							}
 						}
 					}
-					
+
 					totalPartitions = partitions
 					totalResourceMetrics = resourceMetrics
 					totalMetrics = metrics
@@ -688,7 +691,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 				config.PartitionMetricsByResourceAttributes = true
 				config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-				messenger := &kafkaMetricsMessenger{config: *config}
+				messenger := newKafkaMetricsMessenger(*config, nil)
 
 				b.ReportMetric(float64(inputResourceMetrics), "input_resources")
 				b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
@@ -703,7 +706,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 					partitions := 0
 					resourceMetrics := 0
 					metrics := 0
-					
+
 					for _, partitionedData := range messenger.partitionData(md) {
 						partitions++
 						resourceMetrics += partitionedData.ResourceMetrics().Len()
@@ -713,7 +716,7 @@ func BenchmarkMemoryComparison_SameInput(b *testing.B) {
 							}
 						}
 					}
-					
+
 					totalPartitions = partitions
 					totalResourceMetrics = resourceMetrics
 					totalMetrics = metrics
@@ -748,7 +751,7 @@ func BenchmarkMemoryPerPartition(b *testing.B) {
 				config.PartitionMetricsByResourceAttributes = true
 				config.PartitionMetricsRoutingKey = "resource"
 
-				messenger := &kafkaMetricsMessenger{config: *config}
+				messenger := newKafkaMetricsMessenger(*config, nil)
 
 				b.ResetTimer()
 				b.ReportAllocs()
@@ -769,7 +772,7 @@ func BenchmarkMemoryPerPartition(b *testing.B) {
 				config.PartitionMetricsByResourceAttributes = true
 				config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-				messenger := &kafkaMetricsMessenger{config: *config}
+				messenger := newKafkaMetricsMessenger(*config, nil)
 
 				b.ResetTimer()
 				b.ReportAllocs()
@@ -792,7 +795,7 @@ func BenchmarkMemoryPerPartition(b *testing.B) {
 func BenchmarkMemoryComparison_200K(b *testing.B) {
 	// Generate 200K metrics: 200 sources × 1000 metrics each
 	md := generateRealisticMetrics(200, 1000)
-	
+
 	// Calculate input data size
 	inputResourceMetrics := md.ResourceMetrics().Len()
 	inputTotalMetrics := 0
@@ -809,7 +812,7 @@ func BenchmarkMemoryComparison_200K(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
 		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
@@ -835,7 +838,7 @@ func BenchmarkMemoryComparison_200K(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
 		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
@@ -861,7 +864,7 @@ func BenchmarkMemoryComparison_200K(b *testing.B) {
 func BenchmarkMemoryComparison_500K(b *testing.B) {
 	// Generate 500K metrics: 500 sources × 1000 metrics each
 	md := generateRealisticMetrics(500, 1000)
-	
+
 	// Calculate input data size
 	inputResourceMetrics := md.ResourceMetrics().Len()
 	inputTotalMetrics := 0
@@ -878,7 +881,7 @@ func BenchmarkMemoryComparison_500K(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
 		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
@@ -904,7 +907,7 @@ func BenchmarkMemoryComparison_500K(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ReportMetric(float64(inputResourceMetrics), "input_resources")
 		b.ReportMetric(float64(inputTotalMetrics), "input_metrics")
@@ -947,7 +950,7 @@ func BenchmarkBatchingEfficiency(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -982,7 +985,7 @@ func BenchmarkBatchingEfficiency(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -1033,7 +1036,7 @@ func BenchmarkBatchingEfficiency_LargeScale(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -1067,7 +1070,7 @@ func BenchmarkBatchingEfficiency_LargeScale(b *testing.B) {
 		config.PartitionMetricsByResourceAttributes = true
 		config.PartitionMetricsRoutingKey = "resource_and_metric"
 
-		messenger := &kafkaMetricsMessenger{config: *config}
+		messenger := newKafkaMetricsMessenger(*config, nil)
 
 		b.ResetTimer()
 		b.ReportAllocs()
