@@ -47,6 +47,13 @@ func NewFranzProducer(ctx context.Context, clientCfg configkafka.ClientConfig,
 	default:
 		codec = codec.WithLevel(int(cfg.CompressionParams.Level))
 	}
+	var partitioner kgo.Partitioner
+	if clientCfg.AdaptivePartitioning.Enabled {
+		partitioner = newAdaptivePartitioner(clientCfg.AdaptivePartitioning)
+	} else {
+		partitioner = newSaramaCompatPartitioner()
+	}
+
 	opts, err := commonOpts(ctx, clientCfg, logger, append(
 		opts,
 		kgo.ProduceRequestTimeout(timeout),
@@ -54,7 +61,7 @@ func NewFranzProducer(ctx context.Context, clientCfg configkafka.ClientConfig,
 		// Use the UniformBytesPartitioner that is the default in franz-go with
 		// the legacy compatibility sarama hashing to avoid hashing to different
 		// partitions in case partitioning is enabled.
-		kgo.RecordPartitioner(newSaramaCompatPartitioner()),
+		kgo.RecordPartitioner(partitioner),
 	)...)
 	if err != nil {
 		return nil, err
@@ -82,7 +89,16 @@ func NewFranzProducer(ctx context.Context, clientCfg configkafka.ClientConfig,
 		opts = append(opts, kgo.MaxBufferedRecords(cfg.FlushMaxMessages))
 	}
 
-	return kgo.NewClient(opts...)
+	client, clientErr := kgo.NewClient(opts...)
+
+	if clientErr == nil {
+		if adaptivePartitioner, ok := partitioner.(AdaptivePartitioner); ok {
+			// Initialize admin connection
+			adaptivePartitioner.Connect(client)
+		}
+	}
+
+	return client, clientErr
 }
 
 // NewFranzConsumerGroup creates a new Kafka consumer client using the franz-go library.
@@ -292,6 +308,10 @@ func compressionCodec(compression string) kgo.CompressionCodec {
 	default:
 		return kgo.NoCompression()
 	}
+}
+
+func newAdaptivePartitioner(config configkafka.AdaptivePartitioningConfig) kgo.Partitioner {
+	return NewAdaptivePartitioner(newSaramaCompatPartitioner(), config)
 }
 
 func newSaramaCompatPartitioner() kgo.Partitioner {

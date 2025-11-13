@@ -48,13 +48,18 @@ type ClientConfig struct {
 
 	// Metadata holds metadata-related configuration for producers and consumers.
 	Metadata MetadataConfig `mapstructure:"metadata"`
+
+	// AdaptivePartitioning holds configuration for the partitioner that redirects
+	// records based on partition lag
+	AdaptivePartitioning AdaptivePartitioningConfig `mapstructure:"adaptive_partitioning"`
 }
 
 func NewDefaultClientConfig() ClientConfig {
 	return ClientConfig{
-		Brokers:  []string{"localhost:9092"},
-		ClientID: "otel-collector",
-		Metadata: NewDefaultMetadataConfig(),
+		Brokers:              []string{"localhost:9092"},
+		ClientID:             "otel-collector",
+		Metadata:             NewDefaultMetadataConfig(),
+		AdaptivePartitioning: NewDefaultAdaptivePartitioningConfig(),
 	}
 }
 
@@ -300,6 +305,27 @@ func NewDefaultMetadataConfig() MetadataConfig {
 			Max:     3,
 			Backoff: time.Millisecond * 250,
 		},
+	}
+}
+
+type AdaptivePartitioningConfig struct {
+	Enabled         bool    `mapstructure:"enabled"`
+	RedirectRate    float32 `mapstructure:"redirect_rate"`
+	MinLagThreshold int     `mapstructure:"min_lag_threshold"`
+	LagMultiplier   float32 `mapstructure:"lag_multiplier"`
+	// Use time.Duration here?
+	MonitorInterval time.Duration `mapstructure:"monitor_interval"`
+	Topics          []string `mapstructure:"topics"`
+	ConsumerGroups  []string `mapstructure:"consumer_groups"`
+}
+
+func NewDefaultAdaptivePartitioningConfig() AdaptivePartitioningConfig {
+	return AdaptivePartitioningConfig{
+		Enabled:         false,
+		RedirectRate:    0.5,
+		MinLagThreshold: 1000,
+		LagMultiplier:   0.25,
+		MonitorInterval: 30 * time.Second,
 	}
 }
 
