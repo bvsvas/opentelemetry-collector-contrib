@@ -310,7 +310,7 @@ func compressionCodec(compression string) kgo.CompressionCodec {
 	}
 }
 
-func newAdaptivePartitioner(config configkafka.AdaptivePartitioningConfig) kgo.Partitioner {
+func newAdaptivePartitioner(config configkafka.AdaptivePartitioningConfig) AdaptivePartitioner {
 	return NewAdaptivePartitioner(newSaramaCompatPartitioner(), config)
 }
 
