@@ -39,7 +39,7 @@ type adaptivePartitioner struct {
 type adaptiveTopicPartitioner struct {
 	topic              string
 
-	parent             adaptivePartitioner
+	parent             *adaptivePartitioner
 
 	primaryPartitioner kgo.TopicPartitioner
 
@@ -52,7 +52,7 @@ type adaptiveTopicPartitioner struct {
 }
 
 func NewAdaptivePartitioner(primary kgo.Partitioner, config configkafka.AdaptivePartitioningConfig) kgo.Partitioner {
-	return adaptivePartitioner{
+	return &adaptivePartitioner{
 		primary:         primary,
 		redirectRate:    config.RedirectRate,
 		minLagThreshold: config.MinLagThreshold,
@@ -63,12 +63,12 @@ func NewAdaptivePartitioner(primary kgo.Partitioner, config configkafka.Adaptive
 	}
 }
 
-func (ap adaptivePartitioner) Connect(client *kgo.Client) {
+func (ap *adaptivePartitioner) Connect(client *kgo.Client) {
 	// Create an admin connection
 	ap.adminClient = kadm.NewClient(client)
 }
 
-func (ap adaptivePartitioner) ForTopic(topic string) kgo.TopicPartitioner {
+func (ap *adaptivePartitioner) ForTopic(topic string) kgo.TopicPartitioner {
 	ap.lock.Lock()
 	defer ap.lock.Unlock()
 

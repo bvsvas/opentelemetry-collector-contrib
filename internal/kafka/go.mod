@@ -8,6 +8,7 @@ require (
 	github.com/open-telemetry/opentelemetry-collector-contrib/pkg/kafka/configkafka v0.131.0
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
 	github.com/stretchr/testify v1.10.0
+	github.com/twmb/franz-go/pkg/kadm v1.17.1
 	github.com/twmb/franz-go/pkg/kfake v0.0.0-20250320172111-35ab5e5f5327
 	github.com/twmb/franz-go/pkg/sasl/kerberos v1.1.0
 	github.com/xdg-go/scram v1.1.2
@@ -17,10 +18,7 @@ require (
 	go.uber.org/goleak v1.3.0
 )
 
-require (
-	github.com/twmb/franz-go/pkg/kadm v1.17.1 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
-)
+require go.yaml.in/yaml/v3 v3.0.4 // indirect
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.4 // indirect
