@@ -309,14 +309,13 @@ func NewDefaultMetadataConfig() MetadataConfig {
 }
 
 type AdaptivePartitioningConfig struct {
-	Enabled         bool    `mapstructure:"enabled"`
-	RedirectRate    float32 `mapstructure:"redirect_rate"`
-	MinLagThreshold int     `mapstructure:"min_lag_threshold"`
-	LagMultiplier   float32 `mapstructure:"lag_multiplier"`
-	// Use time.Duration here?
+	Enabled         bool          `mapstructure:"enabled"`
+	RedirectRate    float32       `mapstructure:"redirect_rate"`
+	MinLagThreshold int           `mapstructure:"min_lag_threshold"`
+	LagMultiplier   float32       `mapstructure:"lag_multiplier"`
 	MonitorInterval time.Duration `mapstructure:"monitor_interval"`
-	Topics          []string `mapstructure:"topics"`
-	ConsumerGroups  []string `mapstructure:"consumer_groups"`
+	Topics          []string      `mapstructure:"topics"`
+	ConsumerGroups  []string      `mapstructure:"consumer_groups"`
 }
 
 func NewDefaultAdaptivePartitioningConfig() AdaptivePartitioningConfig {
